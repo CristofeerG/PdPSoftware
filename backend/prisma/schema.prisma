@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolUsuario {
+  ADMIN
+  MESERO
+
+  @@map("rol_usuario")
+}
+
+enum UnidadMedida {
+  ML
+  UNIDAD
+
+  @@map("unidad_medida")
+}
+
+enum TipoMovimiento {
+  ENTRADA
+  SALIDA
+  AJUSTE
+
+  @@map("tipo_movimiento")
+}
+
+enum EstadoMesa {
+  LIBRE
+  OCUPADA
+  POR_COBRAR
+
+  @@map("estado_mesa")
+}
+
+enum EstadoCuenta {
+  ABIERTA
+  CERRADA
+
+  @@map("estado_cuenta")
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TARJETA
+  TRANSFERENCIA
+
+  @@map("metodo_pago")
+}
+
+model Usuario {
+  id           Int        @id @default(autoincrement())
+  nombre       String
+  usuario      String     @unique
+  passwordHash String     @map("password_hash")
+  rol          RolUsuario
+  activo       Boolean    @default(true)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  movimientosInventario MovimientoInventario[]
+  cuentas               Cuenta[]
+
+  @@map("usuarios")
+}
+
+model Categoria {
+  id     Int    @id @default(autoincrement())
+  nombre String @unique
+
+  insumos        Insumo[]
+  productosVenta ProductoVenta[]
+
+  @@map("categorias")
+}
+
+model Insumo {
+  id          Int          @id @default(autoincrement())
+  nombre      String
+  categoriaId Int          @map("categoria_id")
+  unidad      UnidadMedida
+  costo       Decimal      @db.Decimal(10, 2)
+  stockActual Decimal      @default(0) @db.Decimal(10, 2) @map("stock_actual")
+  stockMinimo Decimal      @default(0) @db.Decimal(10, 2) @map("stock_minimo")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  categoria   Categoria              @relation(fields: [categoriaId], references: [id])
+  recetaItems RecetaItem[]
+  movimientos MovimientoInventario[]
+
+  @@map("insumos")
+}
+
+model ProductoVenta {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  categoriaId Int      @map("categoria_id")
+  precioVenta Decimal  @db.Decimal(10, 2) @map("precio_venta")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  categoria    Categoria      @relation(fields: [categoriaId], references: [id])
+  recetaItems  RecetaItem[]
+  itemsConsumo ItemConsumo[]
+
+  @@map("productos_venta")
+}
+
+model RecetaItem {
+  id              Int     @id @default(autoincrement())
+  productoVentaId Int     @map("producto_venta_id")
+  insumoId        Int     @map("insumo_id")
+  cantidad        Decimal @db.Decimal(10, 2)
+
+  productoVenta ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+  insumo        Insumo        @relation(fields: [insumoId], references: [id])
+
+  @@unique([productoVentaId, insumoId])
+  @@map("receta_items")
+}
+
+model MovimientoInventario {
+  id        Int            @id @default(autoincrement())
+  insumoId  Int            @map("insumo_id")
+  tipo      TipoMovimiento
+  cantidad  Decimal        @db.Decimal(10, 2)
+  costo     Decimal?       @db.Decimal(10, 2)
+  proveedor String?
+  motivo    String?
+  fecha     DateTime       @default(now())
+  usuarioId Int            @map("usuario_id")
+
+  insumo  Insumo  @relation(fields: [insumoId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@map("movimientos_inventario")
+}
+
+model Mesa {
+  id     Int        @id @default(autoincrement())
+  numero Int        @unique
+  estado EstadoMesa @default(LIBRE)
+
+  cuentas Cuenta[]
+
+  @@map("mesas")
+}
+
+model Cuenta {
+  id            Int          @id @default(autoincrement())
+  mesaId        Int          @map("mesa_id")
+  usuarioId     Int?         @map("usuario_id")
+  fechaApertura DateTime     @default(now()) @map("fecha_apertura")
+  fechaCierre   DateTime?    @map("fecha_cierre")
+  estado        EstadoCuenta @default(ABIERTA)
+  total         Decimal      @default(0) @db.Decimal(10, 2)
+  descuento     Decimal      @default(0) @db.Decimal(10, 2)
+  metodoPago    MetodoPago?  @map("metodo_pago")
+
+  mesa         Mesa          @relation(fields: [mesaId], references: [id])
+  usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
+  itemsConsumo ItemConsumo[]
+
+  @@map("cuentas")
+}
+
+model ItemConsumo {
+  id              Int     @id @default(autoincrement())
+  cuentaId        Int     @map("cuenta_id")
+  productoVentaId Int     @map("producto_venta_id")
+  cantidad        Int
+  precioUnitario  Decimal @db.Decimal(10, 2) @map("precio_unitario")
+  subtotal        Decimal @db.Decimal(10, 2)
+
+  cuenta        Cuenta        @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
+  productoVenta ProductoVenta @relation(fields: [productoVentaId], references: [id])
+
+  @@map("items_consumo")
+}

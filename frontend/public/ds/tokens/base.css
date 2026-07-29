@@ -1,0 +1,4 @@
+html,body{background:var(--color-bg);color:var(--text-primary);font-family:var(--font-body);margin:0;padding:0;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:var(--color-gold)}
+a:hover{color:var(--color-gold-bright)}

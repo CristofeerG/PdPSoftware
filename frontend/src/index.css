@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-fondo text-texto font-sans antialiased;
+  margin: 0;
+}
+
+/* AppShellMobile (sistema de diseno) trae un marco fijo de "celular" (390x790,
+   borde grueso, esquinas redondeadas) pensado para previsualizacion. En la app
+   real debe ocupar toda la pantalla del dispositivo, asi que se neutraliza ese
+   marco y se deja que el shell ocupe el 100% del viewport. */
+.ds-mobile-shell-fullbleed {
+  width: 100%;
+  height: 100%;
+}
+
+.ds-mobile-shell-fullbleed > div {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
