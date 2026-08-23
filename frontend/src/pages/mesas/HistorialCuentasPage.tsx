@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useApi } from "../../hooks/useApi";
 import { ApiError } from "../../lib/api";
 import { METODO_PAGO_LABEL } from "../../types/reportes";
-import type { Cuenta } from "../../types/mesas";
+import { nombreMesa, type Cuenta } from "../../types/mesas";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Field } from "../../components/ui/Field";
@@ -89,7 +89,9 @@ export function HistorialCuentasPage() {
                       <td className="whitespace-nowrap py-2 pr-3 text-texto-secundario">
                         {cuenta.fechaCierre ? new Date(cuenta.fechaCierre).toLocaleString() : "—"}
                       </td>
-                      <td className="py-2 pr-3 text-texto">Mesa {cuenta.mesa?.numero ?? cuenta.mesaId}</td>
+                      <td className="py-2 pr-3 text-texto">
+                        {cuenta.mesa ? nombreMesa(cuenta.mesa) : `Mesa ${cuenta.mesaId}`}
+                      </td>
                       <td className="py-2 pr-3 text-texto-secundario">{cuenta.usuario?.nombre ?? "—"}</td>
                       <td className="py-2 pr-3 text-texto-secundario">
                         {cuenta.metodoPago ? METODO_PAGO_LABEL[cuenta.metodoPago] : "—"}

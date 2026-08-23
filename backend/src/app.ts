@@ -11,6 +11,7 @@ import { productosVentaRouter } from "./modules/inventario/productos-venta.route
 import { reportesRouter } from "./modules/reportes/reportes.routes";
 import { mesasRouter } from "./modules/mesas/mesas.routes";
 import { cuentasRouter } from "./modules/mesas/cuentas.routes";
+import { itemsConsumoRouter } from "./modules/mesas/items-consumo.routes";
 
 export const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/productos-venta", productosVentaRouter);
 app.use("/api/reportes", reportesRouter);
 app.use("/api/mesas", mesasRouter);
 app.use("/api/cuentas", cuentasRouter);
+app.use("/api/items-consumo", itemsConsumoRouter);
 
 // Sirve el build de produccion del frontend (frontend/dist) desde este mismo
 // servidor. En desarrollo esa carpeta no existe todavia (se usa el dev

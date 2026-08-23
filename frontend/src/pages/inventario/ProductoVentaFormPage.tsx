@@ -35,6 +35,7 @@ export function ProductoVentaFormPage() {
   const [nombre, setNombre] = useState("");
   const [categoriaId, setCategoriaId] = useState("");
   const [precioVenta, setPrecioVenta] = useState("");
+  const [unidadesPorEntrega, setUnidadesPorEntrega] = useState("1");
   const [filas, setFilas] = useState<RecetaFila[]>([]);
   const [cantidadesOriginales, setCantidadesOriginales] = useState<Record<number, string>>({});
   const [eliminadas, setEliminadas] = useState<number[]>([]);
@@ -57,6 +58,7 @@ export function ProductoVentaFormPage() {
           setNombre(producto.nombre);
           setCategoriaId(String(producto.categoriaId));
           setPrecioVenta(producto.precioVenta);
+          setUnidadesPorEntrega(String(producto.unidadesPorEntrega));
           const filasIniciales = producto.recetaItems.map((r) => ({
             key: `existente-${r.id}`,
             recetaItemId: r.id,
@@ -101,6 +103,11 @@ export function ProductoVentaFormPage() {
       setError("Elegí una categoría");
       return;
     }
+    const unidadesPorEntregaNum = Number(unidadesPorEntrega);
+    if (!Number.isInteger(unidadesPorEntregaNum) || unidadesPorEntregaNum <= 0) {
+      setError("Unidades por entrega debe ser un entero mayor a 0");
+      return;
+    }
     if (filas.some((f) => !f.insumoId || !f.cantidad || Number(f.cantidad) <= 0)) {
       setError("Cada línea de receta necesita un insumo y una cantidad mayor a 0");
       return;
@@ -120,13 +127,19 @@ export function ProductoVentaFormPage() {
             nombre,
             categoriaId: Number(categoriaId),
             precioVenta: Number(precioVenta),
+            unidadesPorEntrega: unidadesPorEntregaNum,
             receta: filas.map((f) => ({ insumoId: Number(f.insumoId), cantidad: Number(f.cantidad) })),
           },
         });
       } else {
         await api<ProductoVenta>(`/productos-venta/${id}`, {
           method: "PUT",
-          body: { nombre, categoriaId: Number(categoriaId), precioVenta: Number(precioVenta) },
+          body: {
+            nombre,
+            categoriaId: Number(categoriaId),
+            precioVenta: Number(precioVenta),
+            unidadesPorEntrega: unidadesPorEntregaNum,
+          },
         });
 
         for (const recetaItemId of eliminadas) {
@@ -172,7 +185,7 @@ export function ProductoVentaFormPage() {
         </h1>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-4">
             <Field label="Nombre" htmlFor="pv-nombre">
               <Input
                 id="pv-nombre"
@@ -209,6 +222,18 @@ export function ProductoVentaFormPage() {
                 min="0"
                 value={precioVenta}
                 onChange={(event) => setPrecioVenta(event.target.value)}
+                required
+              />
+            </Field>
+
+            <Field label="Unidades por entrega" htmlFor="pv-unidades-entrega">
+              <Input
+                id="pv-unidades-entrega"
+                type="number"
+                step="1"
+                min="1"
+                value={unidadesPorEntrega}
+                onChange={(event) => setUnidadesPorEntrega(event.target.value)}
                 required
               />
             </Field>

@@ -85,7 +85,7 @@ export interface MenuItemRowProps {
 }
 
 export interface TableTileProps {
-  number: number;
+  number: number | string;
   status?: "free" | "occupied" | "reserved";
   total?: number | string;
   onClick?: () => void;

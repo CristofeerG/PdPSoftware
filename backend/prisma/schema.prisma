@@ -95,11 +95,12 @@ model Insumo {
 }
 
 model ProductoVenta {
-  id          Int      @id @default(autoincrement())
-  nombre      String
-  categoriaId Int      @map("categoria_id")
-  precioVenta Decimal  @db.Decimal(10, 2) @map("precio_venta")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id                 Int      @id @default(autoincrement())
+  nombre             String
+  categoriaId        Int      @map("categoria_id")
+  precioVenta        Decimal  @db.Decimal(10, 2) @map("precio_venta")
+  unidadesPorEntrega Int      @default(1) @map("unidades_por_entrega")
+  createdAt          DateTime @default(now()) @map("created_at")
 
   categoria    Categoria      @relation(fields: [categoriaId], references: [id])
   recetaItems  RecetaItem[]
@@ -141,6 +142,7 @@ model MovimientoInventario {
 model Mesa {
   id     Int        @id @default(autoincrement())
   numero Int        @unique
+  nombre String?
   estado EstadoMesa @default(LIBRE)
 
   cuentas Cuenta[]
@@ -167,12 +169,14 @@ model Cuenta {
 }
 
 model ItemConsumo {
-  id              Int     @id @default(autoincrement())
-  cuentaId        Int     @map("cuenta_id")
-  productoVentaId Int     @map("producto_venta_id")
-  cantidad        Int
-  precioUnitario  Decimal @db.Decimal(10, 2) @map("precio_unitario")
-  subtotal        Decimal @db.Decimal(10, 2)
+  id                 Int     @id @default(autoincrement())
+  cuentaId           Int     @map("cuenta_id")
+  productoVentaId    Int     @map("producto_venta_id")
+  cantidad           Int
+  cantidadEntregada  Int     @default(0) @map("cantidad_entregada")
+  cantidadPagada     Int     @default(0) @map("cantidad_pagada")
+  precioUnitario     Decimal @db.Decimal(10, 2) @map("precio_unitario")
+  subtotal           Decimal @db.Decimal(10, 2)
 
   cuenta        Cuenta        @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
   productoVenta ProductoVenta @relation(fields: [productoVentaId], references: [id])

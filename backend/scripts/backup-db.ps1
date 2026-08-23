@@ -2,6 +2,16 @@
 # supervision desde el Programador de tareas de Windows.
 $ErrorActionPreference = "Stop"
 
+# pg_dump.exe no esta en el PATH del sistema (instalacion estandar de
+# PostgreSQL en Windows no lo agrega). Lo buscamos en la carpeta estandar
+# de instalacion en vez de asumir una version fija.
+$pgDumpPath = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin\pg_dump.exe" -ErrorAction SilentlyContinue |
+    Sort-Object { [int]($_.Directory.Parent.Name) } -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+if (-not $pgDumpPath) {
+    throw "No se encontro pg_dump.exe en C:\Program Files\PostgreSQL\<version>\bin. Verifica la instalacion de PostgreSQL."
+}
+
 $raizBackend = Split-Path -Parent $PSScriptRoot
 $archivoEnv = Join-Path $raizBackend ".env"
 if (-not (Test-Path $archivoEnv)) {
@@ -33,7 +43,7 @@ $fecha = Get-Date -Format "yyyy-MM-dd_HHmmss"
 $archivoSalida = Join-Path $carpetaBackups "$baseDatos`_$fecha.sql"
 
 $env:PGPASSWORD = $password
-& pg_dump -h $dbHost -p $puerto -U $usuario -d $baseDatos -F p -f $archivoSalida
+& $pgDumpPath -h $dbHost -p $puerto -U $usuario -d $baseDatos -F p -f $archivoSalida
 $codigoSalida = $LASTEXITCODE
 Remove-Item Env:\PGPASSWORD
 

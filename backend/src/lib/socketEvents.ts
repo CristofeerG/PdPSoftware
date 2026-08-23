@@ -28,6 +28,14 @@ export function emitCuentaItemEliminado(mesaId: number, cuenta: unknown): void {
   getIo().to(ROOMS.mesa(mesaId)).emit("cuenta:item-eliminado", cuenta);
 }
 
+export function emitCuentaItemEntregado(mesaId: number, cuenta: unknown): void {
+  getIo().to(ROOMS.mesa(mesaId)).emit("cuenta:item-entregado", cuenta);
+}
+
+export function emitCuentaItemPagado(mesaId: number, cuenta: unknown): void {
+  getIo().to(ROOMS.mesa(mesaId)).emit("cuenta:item-pagado", cuenta);
+}
+
 export function emitCuentaCerrada(mesaId: number, cuenta: unknown): void {
   getIo().to(ROOMS.mesa(mesaId)).emit("cuenta:cerrada", cuenta);
 }

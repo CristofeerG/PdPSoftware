@@ -79,7 +79,7 @@ export function MesasPage() {
         {mesas.map((mesa) => (
           <div key={mesa.id} style={{ position: "relative", width: 120 }}>
             <TableTile
-              number={mesa.numero}
+              number={mesa.nombre ?? mesa.numero}
               status={tileStatus(mesa.estado)}
               total={mesa.cuentaAbierta ? Number(mesa.cuentaAbierta.total).toFixed(2) : undefined}
               onClick={() => navigate(`/mesas/${mesa.id}`)}

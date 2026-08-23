@@ -11,7 +11,11 @@ mesasRouter.use(authenticate);
 
 const cuentaAbiertaInclude = {
   itemsConsumo: {
-    include: { productoVenta: { select: { id: true, nombre: true } } },
+    include: {
+      productoVenta: {
+        select: { id: true, nombre: true, unidadesPorEntrega: true, categoria: { select: { nombre: true } } },
+      },
+    },
   },
   usuario: { select: { id: true, nombre: true, usuario: true } },
 } as const;

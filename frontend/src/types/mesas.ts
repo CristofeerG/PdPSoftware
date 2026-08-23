@@ -9,9 +9,11 @@ export interface ItemConsumo {
   cuentaId: number;
   productoVentaId: number;
   cantidad: number;
+  cantidadEntregada: number;
+  cantidadPagada: number;
   precioUnitario: string;
   subtotal: string;
-  productoVenta: { id: number; nombre: string };
+  productoVenta: { id: number; nombre: string; unidadesPorEntrega: number; categoria: { nombre: string } };
 }
 
 export interface Cuenta {
@@ -26,14 +28,19 @@ export interface Cuenta {
   metodoPago: MetodoPago | null;
   itemsConsumo: ItemConsumo[];
   usuario?: UsuarioResumen | null;
-  mesa?: { id: number; numero: number; estado: EstadoMesa };
+  mesa?: { id: number; numero: number; nombre: string | null; estado: EstadoMesa };
 }
 
 export interface Mesa {
   id: number;
   numero: number;
+  nombre: string | null;
   estado: EstadoMesa;
   cuentaAbierta: Cuenta | null;
+}
+
+export function nombreMesa(mesa: { numero: number; nombre: string | null }): string {
+  return mesa.nombre ?? `Mesa ${mesa.numero}`;
 }
 
 export const METODOS_PAGO: { valor: MetodoPago; label: string }[] = [

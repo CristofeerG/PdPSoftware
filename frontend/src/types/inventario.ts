@@ -51,6 +51,7 @@ export interface ProductoVenta {
   categoriaId: number;
   categoria: Categoria;
   precioVenta: string;
+  unidadesPorEntrega: number;
   recetaItems: RecetaItem[];
 }
 

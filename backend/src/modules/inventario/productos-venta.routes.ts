@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { isFiniteNumber, isNonEmptyString, isPositiveNumber, parseIntParam } from "../../lib/validation";
+import { isFiniteNumber, isNonEmptyString, isPositiveInteger, isPositiveNumber, parseIntParam } from "../../lib/validation";
 
 export const productosVentaRouter = Router();
 
@@ -66,7 +66,7 @@ productosVentaRouter.post(
   "/",
   requireRole("ADMIN"),
   asyncHandler(async (req, res) => {
-    const { nombre, categoriaId, precioVenta, receta } = req.body ?? {};
+    const { nombre, categoriaId, precioVenta, unidadesPorEntrega, receta } = req.body ?? {};
 
     if (!isNonEmptyString(nombre)) {
       return res.status(400).json({ error: "nombre es requerido" });
@@ -76,6 +76,9 @@ productosVentaRouter.post(
     }
     if (!isPositiveNumber(precioVenta)) {
       return res.status(400).json({ error: "precioVenta debe ser un numero mayor a 0" });
+    }
+    if (unidadesPorEntrega !== undefined && !isPositiveInteger(unidadesPorEntrega)) {
+      return res.status(400).json({ error: "unidadesPorEntrega debe ser un entero mayor a 0" });
     }
 
     let recetaValidada: RecetaInput[] = [];
@@ -107,6 +110,7 @@ productosVentaRouter.post(
           nombre: nombre.trim(),
           categoriaId,
           precioVenta,
+          unidadesPorEntrega: unidadesPorEntrega ?? 1,
           recetaItems: {
             create: recetaValidada.map((item) => ({
               insumoId: item.insumoId,
@@ -133,7 +137,7 @@ productosVentaRouter.put(
     const id = parseIntParam(req.params.id);
     if (id === null) return res.status(400).json({ error: "id invalido" });
 
-    const { nombre, categoriaId, precioVenta } = req.body ?? {};
+    const { nombre, categoriaId, precioVenta, unidadesPorEntrega } = req.body ?? {};
     const data: Prisma.ProductoVentaUpdateInput = {};
 
     if (nombre !== undefined) {
@@ -149,6 +153,12 @@ productosVentaRouter.put(
         return res.status(400).json({ error: "precioVenta debe ser un numero mayor a 0" });
       }
       data.precioVenta = precioVenta;
+    }
+    if (unidadesPorEntrega !== undefined) {
+      if (!isPositiveInteger(unidadesPorEntrega)) {
+        return res.status(400).json({ error: "unidadesPorEntrega debe ser un entero mayor a 0" });
+      }
+      data.unidadesPorEntrega = unidadesPorEntrega;
     }
 
     try {

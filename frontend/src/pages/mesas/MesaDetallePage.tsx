@@ -5,7 +5,7 @@ import { ApiError } from "../../lib/api";
 import { getSocket } from "../../lib/socket";
 import { ds } from "../../lib/designSystem";
 import type { ProductoVenta } from "../../types/inventario";
-import { ESTADO_MESA_LABEL, METODOS_PAGO, type ItemConsumo, type Mesa, type MetodoPago } from "../../types/mesas";
+import { ESTADO_MESA_LABEL, METODOS_PAGO, nombreMesa, type ItemConsumo, type Mesa, type MetodoPago } from "../../types/mesas";
 
 type Accion = null | "cerrar" | "dividir" | "unir";
 
@@ -30,6 +30,8 @@ export function MesaDetallePage() {
   const [accion, setAccion] = useState<Accion>(null);
   const [procesando, setProcesando] = useState(false);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  const [entregandoId, setEntregandoId] = useState<number | null>(null);
+  const [pagandoId, setPagandoId] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
@@ -83,6 +85,8 @@ export function MesaDetallePage() {
     socket.on("cuenta:item-agregado", refrescar);
     socket.on("cuenta:item-editado", refrescar);
     socket.on("cuenta:item-eliminado", refrescar);
+    socket.on("cuenta:item-entregado", refrescar);
+    socket.on("cuenta:item-pagado", refrescar);
     socket.on("cuenta:cerrada", refrescar);
     socket.on("mesa:actualizada", onMesaActualizada);
 
@@ -92,6 +96,8 @@ export function MesaDetallePage() {
       socket.off("cuenta:item-agregado", refrescar);
       socket.off("cuenta:item-editado", refrescar);
       socket.off("cuenta:item-eliminado", refrescar);
+      socket.off("cuenta:item-entregado", refrescar);
+      socket.off("cuenta:item-pagado", refrescar);
       socket.off("cuenta:cerrada", refrescar);
       socket.off("mesa:actualizada", onMesaActualizada);
     };
@@ -161,6 +167,32 @@ export function MesaDetallePage() {
     }
   }
 
+  async function marcarEntregado(item: ItemConsumo) {
+    setErrorAccion(null);
+    setEntregandoId(item.id);
+    try {
+      await api(`/items-consumo/${item.id}/entregar`, { method: "PATCH" });
+      await cargarMesa();
+    } catch (err) {
+      setErrorAccion(err instanceof ApiError ? err.message : "No se pudo marcar la entrega");
+    } finally {
+      setEntregandoId(null);
+    }
+  }
+
+  async function marcarPagado(item: ItemConsumo) {
+    setErrorAccion(null);
+    setPagandoId(item.id);
+    try {
+      await api(`/items-consumo/${item.id}/pagar`, { method: "PATCH" });
+      await cargarMesa();
+    } catch (err) {
+      setErrorAccion(err instanceof ApiError ? err.message : "No se pudo marcar el pago");
+    } finally {
+      setPagandoId(null);
+    }
+  }
+
   async function confirmarCierre() {
     const cuenta = mesa?.cuentaAbierta;
     if (!cuenta || !metodoPago) return;
@@ -169,8 +201,12 @@ export function MesaDetallePage() {
       setErrorAccion("El descuento debe ser un número mayor o igual a 0");
       return;
     }
-    if (descuentoNum > Number(cuenta.total)) {
-      setErrorAccion("El descuento no puede ser mayor al total de la cuenta");
+    const pendiente = Number(cuenta.total) - cuenta.itemsConsumo.reduce(
+      (acc, item) => acc + item.cantidadPagada * Number(item.precioUnitario),
+      0,
+    );
+    if (descuentoNum > pendiente) {
+      setErrorAccion("El descuento no puede ser mayor al monto pendiente de cobro");
       return;
     }
     setProcesando(true);
@@ -261,6 +297,11 @@ export function MesaDetallePage() {
   const cuenta = mesa.cuentaAbierta;
   const mesasConCuenta = otrasMesas.filter((m) => m.cuentaAbierta);
   const totalFixed = cuenta ? Number(cuenta.total).toFixed(2) : "0.00";
+  const montoPagado = cuenta
+    ? cuenta.itemsConsumo.reduce((acc, item) => acc + item.cantidadPagada * Number(item.precioUnitario), 0)
+    : 0;
+  const montoPendiente = cuenta ? Number(cuenta.total) - montoPagado : 0;
+  const montoPendienteFixed = montoPendiente.toFixed(2);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, gap: 16 }}>
@@ -270,7 +311,7 @@ export function MesaDetallePage() {
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--font-display)", fontWeight: 900, fontSize: 20, color: "var(--text-primary)" }}>
-            MESA {mesa.numero}
+            {nombreMesa(mesa).toUpperCase()}
           </span>
           <Badge tone={badgeTonePorEstado[mesa.estado]}>{ESTADO_MESA_LABEL[mesa.estado]}</Badge>
         </div>
@@ -300,7 +341,7 @@ export function MesaDetallePage() {
                     { value: "", label: "Elegir mesa…" },
                     ...mesasConCuenta.map((m) => ({
                       value: String(m.id),
-                      label: `Mesa ${m.numero} ($${Number(m.cuentaAbierta!.total).toFixed(2)})`,
+                      label: `${nombreMesa(m)} ($${Number(m.cuentaAbierta!.total).toFixed(2)})`,
                     })),
                   ]}
                 />
@@ -368,7 +409,7 @@ export function MesaDetallePage() {
               <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)", marginBottom: 4, fontSize: 18 }}>
                 Cuenta actual
               </div>
-              <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 12 }}>Mesa {mesa.numero}</div>
+              <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 12 }}>{nombreMesa(mesa)}</div>
 
               {errorAccion && accion === null && (
                 <p style={{ color: "var(--status-danger)", fontSize: 13, marginBottom: 8 }}>{errorAccion}</p>
@@ -380,32 +421,101 @@ export function MesaDetallePage() {
                     Aún no hay productos agregados.
                   </div>
                 ) : (
-                  cuenta.itemsConsumo.map((item) => (
-                    <MenuItemRow
-                      key={item.id}
-                      name={item.productoVenta.nombre}
-                      price={Number(item.precioUnitario)}
-                      qty={item.cantidad}
-                      onQtyChange={(nuevaCantidad) => fijarCantidad(item, nuevaCantidad)}
-                    />
-                  ))
+                  cuenta.itemsConsumo.map((item) => {
+                    const totalEntregable = item.cantidad * item.productoVenta.unidadesPorEntrega;
+                    const completoEntrega = item.cantidadEntregada >= totalEntregable;
+                    const completoPago = item.cantidadPagada >= item.cantidad;
+                    const unidadPago = item.productoVenta.categoria.nombre.toLowerCase();
+                    return (
+                      <div key={item.id}>
+                        <MenuItemRow
+                          name={item.productoVenta.nombre}
+                          price={Number(item.precioUnitario)}
+                          qty={item.cantidad}
+                          onQtyChange={(nuevaCantidad) => fijarCantidad(item, nuevaCantidad)}
+                        />
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "0 4px 4px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: completoEntrega ? "var(--status-success)" : "var(--text-muted)",
+                            }}
+                          >
+                            {completoEntrega ? "✓ Entregado" : `${item.cantidadEntregada} de ${totalEntregable} entregadas`}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="s"
+                            disabled={completoEntrega || entregandoId === item.id}
+                            onClick={() => marcarEntregado(item)}
+                          >
+                            {entregandoId === item.id ? "…" : "+1 entregada"}
+                          </Button>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "0 4px 12px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: completoPago ? "var(--status-success)" : "var(--text-muted)",
+                            }}
+                          >
+                            {completoPago ? "✓ Pagado" : `${item.cantidadPagada} de ${item.cantidad} ${unidadPago} pagados`}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="s"
+                            disabled={completoPago || pagandoId === item.id}
+                            onClick={() => marcarPagado(item)}
+                          >
+                            {pagandoId === item.id ? "…" : "+1 pagado"}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  padding: "14px 0",
-                  fontWeight: 800,
-                  color: "var(--text-primary)",
-                  fontSize: 17,
-                  borderTop: "1px solid var(--border-subtle)",
-                  marginTop: 8,
-                }}
-              >
-                <span>Total</span>
-                <span>${totalFixed}</span>
+              <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 8, paddingTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text-muted)" }}>
+                  <span>Total consumido</span>
+                  <span>${totalFixed}</span>
+                </div>
+                {montoPagado > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--status-success)" }}>
+                    <span>Ya pagado</span>
+                    <span>-${montoPagado.toFixed(2)}</span>
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    padding: "6px 0 0",
+                    fontWeight: 800,
+                    color: "var(--text-primary)",
+                    fontSize: 17,
+                  }}
+                >
+                  <span>{montoPagado > 0 ? "Pendiente por cobrar" : "Total"}</span>
+                  <span>${montoPendienteFixed}</span>
+                </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -428,7 +538,13 @@ export function MesaDetallePage() {
         {cuenta && (
           <div style={{ minWidth: 320 }}>
             <div style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
-              Cobrar ${totalFixed} de la mesa {mesa.numero} y liberar la mesa.
+              Cobrar ${montoPendienteFixed} de {nombreMesa(mesa)} y liberar la mesa.
+              {montoPagado > 0 && (
+                <>
+                  {" "}
+                  (Total ${totalFixed}, ya se pagaron ${montoPagado.toFixed(2)} en combos.)
+                </>
+              )}
             </div>
 
             <div style={{ marginBottom: 14 }}>
@@ -488,7 +604,7 @@ export function MesaDetallePage() {
                   { value: "", label: "Mesa destino…" },
                   ...otrasMesas.map((m) => ({
                     value: String(m.id),
-                    label: `Mesa ${m.numero} (${m.cuentaAbierta ? `ocupada, $${Number(m.cuentaAbierta.total).toFixed(2)}` : "libre"})`,
+                    label: `${nombreMesa(m)} (${m.cuentaAbierta ? `ocupada, $${Number(m.cuentaAbierta.total).toFixed(2)}` : "libre"})`,
                   })),
                 ]}
               />
@@ -521,7 +637,7 @@ export function MesaDetallePage() {
                     { value: "", label: "Elegir mesa…" },
                     ...mesasConCuenta.map((m) => ({
                       value: String(m.id),
-                      label: `Mesa ${m.numero} ($${Number(m.cuentaAbierta!.total).toFixed(2)})`,
+                      label: `${nombreMesa(m)} ($${Number(m.cuentaAbierta!.total).toFixed(2)})`,
                     })),
                   ]}
                 />

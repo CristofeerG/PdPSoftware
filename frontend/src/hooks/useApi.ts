@@ -3,7 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../lib/api";
 
 interface UseApiOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 }
 

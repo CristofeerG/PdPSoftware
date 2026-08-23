@@ -20,8 +20,21 @@ cuentasRouter.use(authenticate);
 const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA"] as const;
 
 const itemsInclude = {
-  itemsConsumo: { include: { productoVenta: { select: { id: true, nombre: true } } } },
+  itemsConsumo: {
+    include: {
+      productoVenta: {
+        select: { id: true, nombre: true, unidadesPorEntrega: true, categoria: { select: { nombre: true } } },
+      },
+    },
+  },
 } as const;
+
+function calcularMontoPagado(itemsConsumo: { cantidadPagada: number; precioUnitario: Prisma.Decimal }[]): Prisma.Decimal {
+  return itemsConsumo.reduce(
+    (acc, item) => acc.plus(new Prisma.Decimal(item.precioUnitario).times(item.cantidadPagada)),
+    new Prisma.Decimal(0),
+  );
+}
 
 const cuentaDetalleInclude = {
   mesa: true,
@@ -357,15 +370,19 @@ cuentasRouter.post(
       return res.status(400).json({ error: "descuento debe ser un numero mayor o igual a 0" });
     }
 
-    const cuenta = await prisma.cuenta.findUnique({ where: { id: cuentaId } });
+    const cuenta = await prisma.cuenta.findUnique({ where: { id: cuentaId }, include: { itemsConsumo: true } });
     if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
     if (cuenta.estado !== "ABIERTA") {
       return res.status(409).json({ error: "La cuenta ya esta cerrada" });
     }
 
+    const montoPagado = calcularMontoPagado(cuenta.itemsConsumo);
+    const montoPendiente = new Prisma.Decimal(cuenta.total).minus(montoPagado);
     const montoDescuento = descuento ?? 0;
-    if (new Prisma.Decimal(montoDescuento).greaterThan(cuenta.total)) {
-      return res.status(400).json({ error: "El descuento no puede ser mayor al total de la cuenta" });
+    if (new Prisma.Decimal(montoDescuento).greaterThan(montoPendiente)) {
+      return res.status(400).json({
+        error: `El descuento no puede ser mayor al monto pendiente de cobro ($${montoPendiente.toFixed(2)}, ya se pago $${montoPagado.toFixed(2)} de combos)`,
+      });
     }
 
     await prisma.$transaction(async (tx) => {
