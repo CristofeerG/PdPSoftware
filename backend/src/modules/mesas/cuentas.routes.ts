@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 import { authenticate } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { isFiniteNumber, isPositiveInteger, parseIntParam } from "../../lib/validation";
+import { isFiniteNumber, isPositiveInteger, isPositiveNumber, parseIntParam } from "../../lib/validation";
 import {
   emitCuentaCerrada,
   emitCuentaItemAgregado,
@@ -17,10 +17,11 @@ export const cuentasRouter = Router();
 
 cuentasRouter.use(authenticate);
 
-const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA"] as const;
+export const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA"] as const;
 
 const itemsInclude = {
   itemsConsumo: {
+    orderBy: { id: "asc" },
     include: {
       productoVenta: {
         select: { id: true, nombre: true, unidadesPorEntrega: true, categoria: { select: { nombre: true } } },
@@ -362,9 +363,14 @@ cuentasRouter.post(
     const cuentaId = parseIntParam(req.params.id);
     if (cuentaId === null) return res.status(400).json({ error: "id invalido" });
 
-    const { metodoPago, descuento } = req.body ?? {};
-    if (!METODOS_PAGO_VALIDOS.includes(metodoPago)) {
-      return res.status(400).json({ error: `metodoPago debe ser uno de: ${METODOS_PAGO_VALIDOS.join(", ")}` });
+    const { pagos: pagosInput, descuento } = req.body ?? {};
+    const pagos = Array.isArray(pagosInput) ? pagosInput : [];
+    for (const pago of pagos) {
+      if (!pago || !METODOS_PAGO_VALIDOS.includes(pago.metodoPago) || !isPositiveNumber(pago.monto)) {
+        return res.status(400).json({
+          error: `cada pago debe tener metodoPago (${METODOS_PAGO_VALIDOS.join(", ")}) y monto mayor a 0`,
+        });
+      }
     }
     if (descuento !== undefined && (!isFiniteNumber(descuento) || descuento < 0)) {
       return res.status(400).json({ error: "descuento debe ser un numero mayor o igual a 0" });
@@ -381,8 +387,23 @@ cuentasRouter.post(
     const montoDescuento = descuento ?? 0;
     if (new Prisma.Decimal(montoDescuento).greaterThan(montoPendiente)) {
       return res.status(400).json({
-        error: `El descuento no puede ser mayor al monto pendiente de cobro ($${montoPendiente.toFixed(2)}, ya se pago $${montoPagado.toFixed(2)} de combos)`,
+        error: `El descuento no puede ser mayor al monto pendiente de cobro ($${montoPendiente.toFixed(2)}, ya se pago $${montoPagado.toFixed(2)} de la cuenta)`,
       });
+    }
+
+    // Si ya se pago todo (o el descuento cubre el resto) no hace falta
+    // registrar ningun pago nuevo para cerrar la cuenta.
+    const montoACobrar = montoPendiente.minus(montoDescuento);
+    if (montoACobrar.greaterThan(0.01)) {
+      if (pagos.length === 0) {
+        return res.status(400).json({ error: `Faltan $${montoACobrar.toFixed(2)} por cobrar; agrega al menos un pago` });
+      }
+      const sumaPagos = pagos.reduce((acc, pago) => acc.plus(new Prisma.Decimal(pago.monto)), new Prisma.Decimal(0));
+      if (sumaPagos.minus(montoACobrar).abs().greaterThan(0.01)) {
+        return res.status(400).json({
+          error: `La suma de los pagos ($${sumaPagos.toFixed(2)}) debe ser igual al monto a cobrar ($${montoACobrar.toFixed(2)})`,
+        });
+      }
     }
 
     await prisma.$transaction(async (tx) => {
@@ -391,11 +412,16 @@ cuentasRouter.post(
         data: {
           estado: "CERRADA",
           fechaCierre: new Date(),
-          metodoPago,
+          metodoPago: pagos.length === 1 ? pagos[0].metodoPago : null,
           descuento: montoDescuento,
           total: { decrement: montoDescuento },
         },
       });
+      if (pagos.length > 0) {
+        await tx.pago.createMany({
+          data: pagos.map((pago) => ({ cuentaId, monto: pago.monto, metodoPago: pago.metodoPago })),
+        });
+      }
       await tx.mesa.update({ where: { id: cuenta.mesaId }, data: { estado: "LIBRE" } });
     });
 
@@ -462,6 +488,13 @@ cuentasRouter.post(
 
       await tx.itemConsumo.updateMany({
         where: { id: { in: itemsAMover.map((item) => item.id) } },
+        data: { cuentaId: destino.id },
+      });
+      // Los pagos ya registrados de esos items (p. ej. "+1 pagado" antes de
+      // dividir la cuenta) deben moverse con ellos para no quedar huerfanos
+      // apuntando a la cuenta origen.
+      await tx.pago.updateMany({
+        where: { itemConsumoId: { in: itemsAMover.map((item) => item.id) } },
         data: { cuentaId: destino.id },
       });
 

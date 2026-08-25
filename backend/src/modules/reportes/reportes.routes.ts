@@ -134,15 +134,23 @@ reportesRouter.get(
 
     const cuentas = await prisma.cuenta.findMany({
       where: { estado: "CERRADA", fechaCierre: { gte: inicio, lte: fin } },
-      select: { total: true, metodoPago: true },
+      select: { total: true },
     });
 
     const totalVendido = cuentas.reduce((acc, c) => acc.plus(c.total), new Prisma.Decimal(0));
 
+    // El desglose por metodo sale de los pagos individuales (no de
+    // cuenta.metodoPago, que solo cubre el caso de un metodo unico) para que
+    // cuadre con pagos mixtos y con "+1 pagado" cobrado antes del cierre.
+    const pagosDelDia = await prisma.pago.findMany({
+      where: { fecha: { gte: inicio, lte: fin } },
+      select: { monto: true, metodoPago: true },
+    });
+
     const desglosePorMetodoPago = METODOS_PAGO.map((metodoPago) => {
-      const deEsteMetodo = cuentas.filter((c) => c.metodoPago === metodoPago);
-      const total = deEsteMetodo.reduce((acc, c) => acc.plus(c.total), new Prisma.Decimal(0));
-      return { metodoPago, total: total.toFixed(2), cantidadCuentas: deEsteMetodo.length };
+      const deEsteMetodo = pagosDelDia.filter((p) => p.metodoPago === metodoPago);
+      const total = deEsteMetodo.reduce((acc, p) => acc.plus(p.monto), new Prisma.Decimal(0));
+      return { metodoPago, total: total.toFixed(2), cantidadPagos: deEsteMetodo.length };
     });
 
     res.json({

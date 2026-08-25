@@ -1,6 +1,128 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  --color-fondo: #1d1e1c;
+  --color-superficie: #2a2b28;
+  --color-dorado: #cfa846;
+  --color-rojo: #ba1819;
+  --color-texto: #f5f1e8;
+  --color-texto-secundario: #8c8c86;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+/* Modo claro. Se activa poniendo data-theme="light" en <html> (ver
+   ThemeContext). Valores tomados directamente del proyecto de Claude Design
+   "La Posada del Palomo POS" (POS Login y Navegacion.dc.html) — no son una
+   aproximacion propia. Cubre los tokens del sistema de diseno externo
+   (public/ds/tokens/colors.css, usados por todos los componentes de ds())
+   y los tokens propios de Tailwind (@theme, arriba) que usan las paginas de
+   Inventario/Reportes/Admin.
+
+   --color-bg se deja transparente a proposito (igual que en el diseno
+   original): AppShellDesktop/AppShellMobile pintan su fondo con esa
+   variable, y dejarla transparente permite que el fondo con las esquinas
+   decoradas (ver regla de "body" mas abajo) se vea a traves del area de
+   contenido. La sidebar no se ve afectada porque usa --surface-1, que aqui
+   es un color opaco independiente. */
+:root[data-theme="light"] {
+  --color-bg: transparent;
+  --color-bg-raised: #f8f6ef;
+  --color-bg-sunken: #e3dfd2;
+  --surface-1: #efece2;
+  --surface-2: #f8f6ef;
+  --surface-3: #ffffff;
+  --surface-sunken: #e3dfd2;
+  --border-subtle: rgba(29, 30, 28, 0.1);
+  --border-default: rgba(29, 30, 28, 0.18);
+  --border-gold: rgba(140, 115, 50, 0.55);
+  --text-primary: #1d1e1c;
+  --text-secondary: #5c5b52;
+  --text-muted: rgba(29, 30, 28, 0.52);
+  --color-cream: #1d1e1c;
+  --color-cream-dim: #5c5b52;
+  --color-gold: #9a7b25;
+  --color-gold-bright: #7c6118;
+  --color-gold-dim: #c6a44e;
+  --text-on-gold: #fffcf2;
+  --accent-primary: #9a7b25;
+  --accent-primary-hover: #7c6118;
+  --accent-primary-active: #c6a44e;
+  --status-warning: #7c6118;
+  --status-warning-bg: rgba(154, 123, 37, 0.38);
+  --status-reserved: #7c6118;
+  --status-reserved-bg: rgba(154, 123, 37, 0.38);
+  --status-danger: #a81516;
+  --status-danger-bg: rgba(168, 21, 22, 0.32);
+  --status-success-bg: rgba(63, 107, 59, 0.35);
+  --status-free-bg: rgba(63, 107, 59, 0.35);
+  --status-occupied-bg: rgba(168, 21, 22, 0.32);
+  --accent-secondary: #a81516;
+  --accent-secondary-hover: #8c1011;
+  --accent-secondary-active: #6e0c0d;
+  --text-on-red: #fff6f0;
+  --color-red: #a81516;
+  --status-occupied: #a81516;
+  --status-free: #3f6b3b;
+  --status-success: #3f6b3b;
+  --shadow-color: 60deg 8% 40%;
+
+  /* Tokens propios de Tailwind (ver @theme arriba). Estos si necesitan ser
+     opacos: los usan componentes locales (Input.tsx, paginas de
+     Inventario/Reportes) que no dependen del truco de transparencia. */
+  --color-fondo: #efece2;
+  --color-superficie: #f8f6ef;
+  --color-dorado: #9a7b25;
+  --color-rojo: #a81516;
+  --color-texto: #1d1e1c;
+  --color-texto-secundario: #5c5b52;
+}
+
+/* Los iconos de lucide (nav, botones de Inventario) vienen con
+   filter:invert(1) en linea para verse blancos sobre el fondo oscuro. En
+   claro serian invisibles (blanco sobre crema), asi que se anula. */
+:root[data-theme="light"] img[src*="lucide"] {
+  filter: none !important;
+  opacity: 0.65 !important;
+}
+
+/* Fondo "blanco hueso" con las cuatro esquinas decoradas (arte de bebidas),
+   igual que en el diseno original. Va en <body> (no en --color-bg, que se
+   deja transparente arriba) para que se vea detras del area de contenido
+   del shell y del login. */
+:root[data-theme="light"] body {
+  background-color: #efece2;
+  background-image:
+    url("/img/doodles/doodle-tl.svg"),
+    url("/img/doodles/doodle-tr.svg"),
+    url("/img/doodles/doodle-bl.svg"),
+    url("/img/doodles/doodle-br.svg");
+  background-size: 190px 190px;
+  background-position:
+    left top,
+    right top,
+    left bottom,
+    right bottom;
+  background-repeat: no-repeat;
+}
 
 html,
 body,
@@ -28,4 +150,25 @@ body {
   border-radius: 0 !important;
   border: none !important;
   box-shadow: none !important;
+}
+
+/* MenuItemRow (sistema de diseno) trae su propio borde inferior; en la lista
+   de "Cuenta actual" ese borde se solapaba visualmente con el estado de
+   entrega/pago del mismo producto, asi que se anula aqui y el separador
+   entre productos distintos se maneja aparte (ver MesaDetallePage). */
+.item-consumo-row > div {
+  border-bottom: none !important;
+}
+
+/* public/ds/tokens/base.css (sistema de diseno, cargado global y fuera de
+   cualquier @layer) trae "a { color: var(--color-gold) } a:hover { color:
+   var(--color-gold-bright) }" sin ambito. Al no estar en un @layer le gana a
+   CUALQUIER utilidad de Tailwind sin importar su especificidad, asi que el
+   texto de los tabs de Inventario (son <NavLink>, es decir <a>) quedaba
+   dorado sobre fondo dorado: invisible en reposo, y solo se distinguia un
+   poco al pasar el mouse (--color-gold-bright, mas claro). Se fuerza blanco
+   siempre en el tab activo con !important, unica forma de ganarle a una
+   regla sin @layer. */
+.inventario-tabs a[aria-current="page"] {
+  color: #fff !important;
 }

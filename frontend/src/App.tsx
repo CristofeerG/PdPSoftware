@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/LoginPage";
@@ -16,71 +17,73 @@ import { UsuariosPage } from "./pages/admin/UsuariosPage";
 
 function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route path="/" element={<Navigate to="/mesas" replace />} />
-
-            <Route path="/mesas" element={<MesasPage />} />
-            <Route path="/mesas/:id" element={<MesaDetallePage />} />
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
 
             <Route
-              path="/historial"
               element={
-                <ProtectedRoute rolesPermitidos={["ADMIN"]}>
-                  <HistorialCuentasPage />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/reportes"
-              element={
-                <ProtectedRoute rolesPermitidos={["ADMIN"]}>
-                  <ReportesPage />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/usuarios"
-              element={
-                <ProtectedRoute rolesPermitidos={["ADMIN"]}>
-                  <UsuariosPage />
-                </ProtectedRoute>
-              }
-            />
-
-            <Route
-              path="/admin"
-              element={
-                <ProtectedRoute rolesPermitidos={["ADMIN"]}>
-                  <InventarioLayout />
+                <ProtectedRoute>
+                  <Layout />
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Navigate to="insumos" replace />} />
-              <Route path="insumos" element={<InsumosPage />} />
-              <Route path="categorias" element={<CategoriasPage />} />
-              <Route path="productos-venta" element={<ProductosVentaPage />} />
-              <Route path="productos-venta/nuevo" element={<ProductoVentaFormPage />} />
-              <Route path="productos-venta/:id/editar" element={<ProductoVentaFormPage />} />
-            </Route>
-          </Route>
+              <Route path="/" element={<Navigate to="/mesas" replace />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+              <Route path="/mesas" element={<MesasPage />} />
+              <Route path="/mesas/:id" element={<MesaDetallePage />} />
+
+              <Route
+                path="/historial"
+                element={
+                  <ProtectedRoute rolesPermitidos={["ADMIN"]}>
+                    <HistorialCuentasPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/reportes"
+                element={
+                  <ProtectedRoute rolesPermitidos={["ADMIN"]}>
+                    <ReportesPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/usuarios"
+                element={
+                  <ProtectedRoute rolesPermitidos={["ADMIN"]}>
+                    <UsuariosPage />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute rolesPermitidos={["ADMIN"]}>
+                    <InventarioLayout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<Navigate to="insumos" replace />} />
+                <Route path="insumos" element={<InsumosPage />} />
+                <Route path="categorias" element={<CategoriasPage />} />
+                <Route path="productos-venta" element={<ProductosVentaPage />} />
+                <Route path="productos-venta/nuevo" element={<ProductoVentaFormPage />} />
+                <Route path="productos-venta/:id/editar" element={<ProductoVentaFormPage />} />
+              </Route>
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

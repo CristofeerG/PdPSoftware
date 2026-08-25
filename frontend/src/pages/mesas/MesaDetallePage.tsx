@@ -9,6 +9,11 @@ import { ESTADO_MESA_LABEL, METODOS_PAGO, nombreMesa, type ItemConsumo, type Mes
 
 type Accion = null | "cerrar" | "dividir" | "unir";
 
+interface FilaPago {
+  metodoPago: MetodoPago | "";
+  monto: string;
+}
+
 const badgeTonePorEstado: Record<Mesa["estado"], "free" | "occupied" | "warning"> = {
   LIBRE: "free",
   OCUPADA: "occupied",
@@ -35,8 +40,9 @@ export function MesaDetallePage() {
 
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
-  const [metodoPago, setMetodoPago] = useState<MetodoPago | null>(null);
   const [descuento, setDescuento] = useState("");
+  const [pagosCierre, setPagosCierre] = useState<FilaPago[]>([{ metodoPago: "", monto: "" }]);
+  const [itemParaPagar, setItemParaPagar] = useState<ItemConsumo | null>(null);
   const [itemsSeleccionados, setItemsSeleccionados] = useState<Set<number>>(new Set());
   const [mesaDestino, setMesaDestino] = useState("");
   const [mesaOrigen, setMesaOrigen] = useState("");
@@ -107,11 +113,23 @@ export function MesaDetallePage() {
   function cerrarPanel() {
     setAccion(null);
     setErrorAccion(null);
-    setMetodoPago(null);
     setDescuento("");
+    setPagosCierre([{ metodoPago: "", monto: "" }]);
     setItemsSeleccionados(new Set());
     setMesaDestino("");
     setMesaOrigen("");
+  }
+
+  function actualizarFilaPago(index: number, cambios: Partial<FilaPago>) {
+    setPagosCierre((prev) => prev.map((fila, i) => (i === index ? { ...fila, ...cambios } : fila)));
+  }
+
+  function agregarFilaPago() {
+    setPagosCierre((prev) => [...prev, { metodoPago: "", monto: "" }]);
+  }
+
+  function quitarFilaPago(index: number) {
+    setPagosCierre((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function abrirMesa() {
@@ -180,12 +198,13 @@ export function MesaDetallePage() {
     }
   }
 
-  async function marcarPagado(item: ItemConsumo) {
+  async function marcarPagado(item: ItemConsumo, metodoPago: MetodoPago) {
     setErrorAccion(null);
     setPagandoId(item.id);
     try {
-      await api(`/items-consumo/${item.id}/pagar`, { method: "PATCH" });
+      await api(`/items-consumo/${item.id}/pagar`, { method: "PATCH", body: { metodoPago } });
       await cargarMesa();
+      setItemParaPagar(null);
     } catch (err) {
       setErrorAccion(err instanceof ApiError ? err.message : "No se pudo marcar el pago");
     } finally {
@@ -193,9 +212,35 @@ export function MesaDetallePage() {
     }
   }
 
+  async function deshacerEntrega(item: ItemConsumo) {
+    setErrorAccion(null);
+    setEntregandoId(item.id);
+    try {
+      await api(`/items-consumo/${item.id}/deshacer-entrega`, { method: "PATCH" });
+      await cargarMesa();
+    } catch (err) {
+      setErrorAccion(err instanceof ApiError ? err.message : "No se pudo deshacer la entrega");
+    } finally {
+      setEntregandoId(null);
+    }
+  }
+
+  async function deshacerPago(item: ItemConsumo) {
+    setErrorAccion(null);
+    setPagandoId(item.id);
+    try {
+      await api(`/items-consumo/${item.id}/deshacer-pago`, { method: "PATCH" });
+      await cargarMesa();
+    } catch (err) {
+      setErrorAccion(err instanceof ApiError ? err.message : "No se pudo deshacer el pago");
+    } finally {
+      setPagandoId(null);
+    }
+  }
+
   async function confirmarCierre() {
     const cuenta = mesa?.cuentaAbierta;
-    if (!cuenta || !metodoPago) return;
+    if (!cuenta) return;
     const descuentoNum = descuento ? Number(descuento) : 0;
     if (Number.isNaN(descuentoNum) || descuentoNum < 0) {
       setErrorAccion("El descuento debe ser un número mayor o igual a 0");
@@ -209,12 +254,31 @@ export function MesaDetallePage() {
       setErrorAccion("El descuento no puede ser mayor al monto pendiente de cobro");
       return;
     }
+    const montoACobrar = pendiente - descuentoNum;
+    const pagos = pagosCierre
+      .filter((fila) => fila.metodoPago !== "" && fila.monto !== "")
+      .map((fila) => ({ metodoPago: fila.metodoPago as MetodoPago, monto: Number(fila.monto) }));
+    // Si ya se pago todo (o el descuento cubre el resto) no hace falta
+    // ningun pago nuevo para cerrar.
+    if (montoACobrar > 0.01) {
+      if (pagos.length === 0 || pagos.some((p) => !(p.monto > 0))) {
+        setErrorAccion("Agregá al menos un pago con método y monto mayor a 0");
+        return;
+      }
+      const sumaPagos = pagos.reduce((acc, p) => acc + p.monto, 0);
+      if (Math.abs(sumaPagos - montoACobrar) > 0.01) {
+        setErrorAccion(
+          `La suma de los pagos ($${sumaPagos.toFixed(2)}) debe ser igual al monto a cobrar ($${montoACobrar.toFixed(2)})`,
+        );
+        return;
+      }
+    }
     setProcesando(true);
     setErrorAccion(null);
     try {
       await api(`/cuentas/${cuenta.id}/cerrar`, {
         method: "POST",
-        body: { metodoPago, descuento: descuentoNum || undefined },
+        body: { pagos, descuento: descuentoNum || undefined },
       });
       cerrarPanel();
       await cargarMesa();
@@ -302,6 +366,12 @@ export function MesaDetallePage() {
     : 0;
   const montoPendiente = cuenta ? Number(cuenta.total) - montoPagado : 0;
   const montoPendienteFixed = montoPendiente.toFixed(2);
+  const descuentoCierreNum = descuento ? Number(descuento) : 0;
+  const montoACobrar = montoPendiente - (Number.isFinite(descuentoCierreNum) ? descuentoCierreNum : 0);
+  const faltaCobrar = montoACobrar > 0.01;
+  const pagosCierreSuma = pagosCierre.reduce((acc, fila) => acc + (Number(fila.monto) || 0), 0);
+  const pagosCierreCompletos = !faltaCobrar || pagosCierre.every((fila) => fila.metodoPago !== "" && Number(fila.monto) > 0);
+  const pagosCierreSumaCoincide = !faltaCobrar || Math.abs(pagosCierreSuma - montoACobrar) < 0.01;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, gap: 16 }}>
@@ -421,24 +491,34 @@ export function MesaDetallePage() {
                     Aún no hay productos agregados.
                   </div>
                 ) : (
-                  cuenta.itemsConsumo.map((item) => {
+                  cuenta.itemsConsumo.map((item, index) => {
                     const totalEntregable = item.cantidad * item.productoVenta.unidadesPorEntrega;
                     const completoEntrega = item.cantidadEntregada >= totalEntregable;
                     const completoPago = item.cantidadPagada >= item.cantidad;
                     const unidadPago = item.productoVenta.categoria.nombre.toLowerCase();
                     return (
-                      <div key={item.id}>
-                        <MenuItemRow
-                          name={item.productoVenta.nombre}
-                          price={Number(item.precioUnitario)}
-                          qty={item.cantidad}
-                          onQtyChange={(nuevaCantidad) => fijarCantidad(item, nuevaCantidad)}
-                        />
+                      <div
+                        key={item.id}
+                        style={
+                          index > 0
+                            ? { borderTop: "1px solid var(--border-subtle)", marginTop: 8, paddingTop: 8 }
+                            : undefined
+                        }
+                      >
+                        <div className="item-consumo-row">
+                          <MenuItemRow
+                            name={item.productoVenta.nombre}
+                            price={Number(item.precioUnitario)}
+                            qty={item.cantidad}
+                            onQtyChange={(nuevaCantidad) => fijarCantidad(item, nuevaCantidad)}
+                          />
+                        </div>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
+                            gap: 8,
                             padding: "0 4px 4px",
                           }}
                         >
@@ -451,20 +531,31 @@ export function MesaDetallePage() {
                           >
                             {completoEntrega ? "✓ Entregado" : `${item.cantidadEntregada} de ${totalEntregable} entregadas`}
                           </span>
-                          <Button
-                            variant="ghost"
-                            size="s"
-                            disabled={completoEntrega || entregandoId === item.id}
-                            onClick={() => marcarEntregado(item)}
-                          >
-                            {entregandoId === item.id ? "…" : "+1 entregada"}
-                          </Button>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              disabled={item.cantidadEntregada <= 0 || entregandoId === item.id}
+                              onClick={() => deshacerEntrega(item)}
+                            >
+                              -1
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              disabled={completoEntrega || entregandoId === item.id}
+                              onClick={() => marcarEntregado(item)}
+                            >
+                              {entregandoId === item.id ? "…" : "+1 entregada"}
+                            </Button>
+                          </div>
                         </div>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
+                            gap: 8,
                             padding: "0 4px 12px",
                           }}
                         >
@@ -477,14 +568,24 @@ export function MesaDetallePage() {
                           >
                             {completoPago ? "✓ Pagado" : `${item.cantidadPagada} de ${item.cantidad} ${unidadPago} pagados`}
                           </span>
-                          <Button
-                            variant="ghost"
-                            size="s"
-                            disabled={completoPago || pagandoId === item.id}
-                            onClick={() => marcarPagado(item)}
-                          >
-                            {pagandoId === item.id ? "…" : "+1 pagado"}
-                          </Button>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              disabled={item.cantidadPagada <= 0 || pagandoId === item.id}
+                              onClick={() => deshacerPago(item)}
+                            >
+                              -1
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              disabled={completoPago || pagandoId === item.id}
+                              onClick={() => setItemParaPagar(item)}
+                            >
+                              {pagandoId === item.id ? "…" : "+1 pagado"}
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -525,7 +626,14 @@ export function MesaDetallePage() {
                 <Button variant="ghost" size="l" onClick={() => alternarAccion("unir")}>
                   Unir mesas
                 </Button>
-                <Button variant="primary" size="l" onClick={() => alternarAccion("cerrar")}>
+                <Button
+                  variant="primary"
+                  size="l"
+                  onClick={() => {
+                    setPagosCierre([{ metodoPago: "", monto: montoPendienteFixed }]);
+                    alternarAccion("cerrar");
+                  }}
+                >
                   Cerrar cuenta
                 </Button>
               </div>
@@ -542,25 +650,66 @@ export function MesaDetallePage() {
               {montoPagado > 0 && (
                 <>
                   {" "}
-                  (Total ${totalFixed}, ya se pagaron ${montoPagado.toFixed(2)} en combos.)
+                  (Total ${totalFixed}, ya se pagaron ${montoPagado.toFixed(2)} de la cuenta.)
                 </>
               )}
             </div>
 
-            <div style={{ marginBottom: 14 }}>
-              <Tabs
-                items={METODOS_PAGO.map((m) => ({ value: m.valor, label: m.label }))}
-                active={metodoPago ?? ""}
-                onChange={(value) => setMetodoPago(value as MetodoPago)}
-              />
-            </div>
+            {faltaCobrar && (
+              <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                {pagosCierre.map((fila, index) => (
+                  <div key={index} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                    <div style={{ flex: 1 }}>
+                      <Select
+                        label={index === 0 ? "Método" : undefined}
+                        value={fila.metodoPago}
+                        onChange={(event) => actualizarFilaPago(index, { metodoPago: event.target.value as MetodoPago })}
+                        options={[
+                          { value: "", label: "Elegir…" },
+                          ...METODOS_PAGO.map((m) => ({ value: m.valor, label: m.label })),
+                        ]}
+                      />
+                    </div>
+                    <div style={{ width: 110 }}>
+                      <Input
+                        label={index === 0 ? "Monto" : undefined}
+                        type="number"
+                        value={fila.monto}
+                        onChange={(event) => actualizarFilaPago(index, { monto: event.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    {pagosCierre.length > 1 && (
+                      <Button variant="ghost" size="s" onClick={() => quitarFilaPago(index)}>
+                        ✕
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <Button variant="ghost" size="s" onClick={agregarFilaPago}>
+                  + Agregar otro método (pago mixto)
+                </Button>
+                <div style={{ fontSize: 12, color: pagosCierreSumaCoincide ? "var(--status-success)" : "var(--text-muted)" }}>
+                  Asignado ${pagosCierreSuma.toFixed(2)} de ${montoACobrar.toFixed(2)} a cobrar
+                </div>
+              </div>
+            )}
 
             <div style={{ marginBottom: 16 }}>
               <Input
                 label="Descuento (opcional)"
                 type="number"
                 value={descuento}
-                onChange={(event) => setDescuento(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setDescuento(value);
+                  setPagosCierre((prev) => {
+                    if (prev.length !== 1) return prev;
+                    const nuevoDescuento = value ? Number(value) : 0;
+                    const nuevoMonto = montoPendiente - (Number.isFinite(nuevoDescuento) ? nuevoDescuento : 0);
+                    return [{ ...prev[0], monto: nuevoMonto.toFixed(2) }];
+                  });
+                }}
                 placeholder="0.00"
               />
             </div>
@@ -568,13 +717,43 @@ export function MesaDetallePage() {
             {errorAccion && <p style={{ color: "var(--status-danger)", fontSize: 13, marginBottom: 12 }}>{errorAccion}</p>}
 
             <div style={{ display: "flex", gap: 10 }}>
-              <Button variant="primary" disabled={!metodoPago || procesando} onClick={confirmarCierre}>
+              <Button
+                variant="primary"
+                disabled={!pagosCierreCompletos || !pagosCierreSumaCoincide || procesando}
+                onClick={confirmarCierre}
+              >
                 {procesando ? "Cerrando…" : "Confirmar"}
               </Button>
               <Button variant="ghost" onClick={cerrarPanel}>
                 Cancelar
               </Button>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={itemParaPagar !== null} title="Confirmar pago" onClose={() => setItemParaPagar(null)}>
+        {itemParaPagar && (
+          <div style={{ minWidth: 280 }}>
+            <div style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              ¿Cómo se pagó "{itemParaPagar.productoVenta.nombre}"? (${Number(itemParaPagar.precioUnitario).toFixed(2)})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+              {METODOS_PAGO.map((m) => (
+                <Button
+                  key={m.valor}
+                  variant="secondary"
+                  size="l"
+                  disabled={pagandoId === itemParaPagar.id}
+                  onClick={() => marcarPagado(itemParaPagar, m.valor)}
+                >
+                  {pagandoId === itemParaPagar.id ? "…" : m.label}
+                </Button>
+              ))}
+            </div>
+            <Button variant="ghost" onClick={() => setItemParaPagar(null)}>
+              Cancelar
+            </Button>
           </div>
         )}
       </Modal>

@@ -1,5 +1,5 @@
-export function parseIntParam(value: string): number | null {
-  if (!/^\d+$/.test(value)) return null;
+export function parseIntParam(value: string | string[] | undefined): number | null {
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
   return Number.parseInt(value, 10);
 }
 

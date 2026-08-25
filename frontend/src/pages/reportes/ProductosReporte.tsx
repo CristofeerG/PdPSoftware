@@ -4,7 +4,6 @@ import { ApiError } from "../../lib/api";
 import type { ProductoVendido } from "../../types/reportes";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
-import { BarraSimple } from "../../components/ui/BarraSimple";
 
 type Orden = "mas" | "menos";
 
@@ -30,8 +29,6 @@ export function ProductosReporte() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orden]);
-
-  const maximo = datos.reduce((max, fila) => Math.max(max, fila.cantidadVendida), 0);
 
   return (
     <Card className="flex flex-col gap-4">
@@ -64,16 +61,29 @@ export function ProductosReporte() {
       ) : datos.length === 0 ? (
         <p className="text-sm text-texto-secundario">Todavía no hay productos de venta cargados.</p>
       ) : (
-        <div className="flex flex-col gap-3">
-          {datos.map((fila) => (
-            <BarraSimple
-              key={fila.productoVentaId}
-              etiqueta={fila.nombre}
-              valor={fila.cantidadVendida}
-              maximo={maximo}
-              detalle={`${fila.cantidadVendida} u. · $${Number(fila.totalVendido).toFixed(2)}`}
-            />
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-texto-secundario">
+                <th className="w-10 py-2 text-left font-medium">#</th>
+                <th className="py-2 text-left font-medium">Producto</th>
+                <th className="py-2 text-right font-medium">Cantidad</th>
+                <th className="py-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {datos.map((fila, indice) => (
+                <tr key={fila.productoVentaId} className="border-b border-white/5 last:border-0">
+                  <td className="py-2.5 tabular-nums text-texto-secundario">{indice + 1}</td>
+                  <td className="py-2.5 font-medium text-texto">{fila.nombre}</td>
+                  <td className="py-2.5 text-right tabular-nums text-texto">{fila.cantidadVendida} u.</td>
+                  <td className="py-2.5 text-right font-semibold tabular-nums text-dorado">
+                    ${Number(fila.totalVendido).toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </Card>

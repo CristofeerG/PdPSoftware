@@ -47,7 +47,7 @@ export const reportesSchemas = {
     properties: {
       metodoPago: { type: "string", enum: ["EFECTIVO", "TARJETA", "TRANSFERENCIA"] },
       total: { type: "string", example: "450.00" },
-      cantidadCuentas: { type: "integer", example: 3 },
+      cantidadPagos: { type: "integer", example: 3, description: "Cantidad de pagos individuales con este metodo (permite pago mixto)" },
     },
   },
   CierreCaja: {

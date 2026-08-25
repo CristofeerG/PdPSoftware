@@ -23,6 +23,12 @@ export default tseslint.config(
         'warn',
         { allowConstantExport: true },
       ],
+      // El patron "setCargando(true)/setError(null) al inicio del efecto" que
+      // usan las paginas de reportes para refetch en cambios de filtro es el
+      // patron recomendado por la doc de React (con flag de cleanup). La
+      // regla es nueva en eslint-plugin-react-hooks v7 y lo marca como error;
+      // se deja en warn en vez de reescribir esas paginas.
+      'react-hooks/set-state-in-effect': 'warn',
     },
   },
 )

@@ -11,6 +11,7 @@ mesasRouter.use(authenticate);
 
 const cuentaAbiertaInclude = {
   itemsConsumo: {
+    orderBy: { id: "asc" },
     include: {
       productoVenta: {
         select: { id: true, nombre: true, unidadesPorEntrega: true, categoria: { select: { nombre: true } } },
@@ -135,6 +136,13 @@ mesasRouter.post(
     await prisma.$transaction(async (tx) => {
       if (cuentaDestinoExistente) {
         await tx.itemConsumo.updateMany({
+          where: { cuentaId: cuentaOrigen.id },
+          data: { cuentaId: cuentaDestinoExistente.id },
+        });
+        // La cuenta origen se borra abajo; sus pagos (de items marcados
+        // "+1 pagado" antes de unir) deben moverse a la cuenta destino para
+        // no perder el registro del dinero.
+        await tx.pago.updateMany({
           where: { cuentaId: cuentaOrigen.id },
           data: { cuentaId: cuentaDestinoExistente.id },
         });

@@ -95,9 +95,24 @@ export const mesasSchemas = {
   },
   CerrarCuentaInput: {
     type: "object",
-    required: ["metodoPago"],
+    required: ["pagos"],
     properties: {
-      metodoPago: { type: "string", enum: ["EFECTIVO", "TARJETA", "TRANSFERENCIA"], example: "EFECTIVO" },
+      pagos: {
+        type: "array",
+        description: "Uno o mas pagos (permite pago mixto); la suma de monto debe igualar el monto a cobrar",
+        items: {
+          type: "object",
+          required: ["metodoPago", "monto"],
+          properties: {
+            metodoPago: { type: "string", enum: ["EFECTIVO", "TARJETA", "TRANSFERENCIA"], example: "EFECTIVO" },
+            monto: { type: "number", example: 30.5 },
+          },
+        },
+        example: [
+          { metodoPago: "EFECTIVO", monto: 30.5 },
+          { metodoPago: "TRANSFERENCIA", monto: 20 },
+        ],
+      },
       descuento: {
         type: "number",
         example: 0,
@@ -324,7 +339,7 @@ export const mesasPaths = {
           description: "Cuenta cerrada",
           content: { "application/json": { schema: { $ref: "#/components/schemas/Cuenta" } } },
         },
-        "400": errorResponse("metodoPago invalido, o descuento invalido/mayor al total"),
+        "400": errorResponse("pagos invalido, suma de pagos distinta al monto a cobrar, o descuento invalido/mayor al total"),
         "404": errorResponse("Cuenta no encontrada"),
         "409": errorResponse("La cuenta ya esta cerrada"),
       },

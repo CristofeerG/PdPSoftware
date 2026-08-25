@@ -31,7 +31,7 @@ export type MetodoPago = "EFECTIVO" | "TARJETA" | "TRANSFERENCIA";
 export interface DesgloseMetodoPago {
   metodoPago: MetodoPago;
   total: string;
-  cantidadCuentas: number;
+  cantidadPagos: number;
 }
 
 export interface CierreCaja {

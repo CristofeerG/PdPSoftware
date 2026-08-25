@@ -1,7 +1,7 @@
 import { useId, useState, type InputHTMLAttributes, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 
 const campoClases =
-  "w-full rounded-md border border-black/20 bg-fondo px-3 py-2 text-texto placeholder:text-texto-secundario focus:border-dorado focus:outline-none focus:ring-1 focus:ring-dorado disabled:opacity-50";
+  "w-full rounded-md border border-black/20 bg-fondo px-3 py-2 text-texto placeholder:text-texto-secundario focus:border-dorado focus:outline-hidden focus:ring-1 focus:ring-dorado disabled:opacity-50";
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${campoClases} ${props.className ?? ""}`} />;

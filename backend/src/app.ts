@@ -12,6 +12,8 @@ import { reportesRouter } from "./modules/reportes/reportes.routes";
 import { mesasRouter } from "./modules/mesas/mesas.routes";
 import { cuentasRouter } from "./modules/mesas/cuentas.routes";
 import { itemsConsumoRouter } from "./modules/mesas/items-consumo.routes";
+import { gastosRouter } from "./modules/caja/gastos.routes";
+import { cierresCajaRouter } from "./modules/caja/cierres.routes";
 
 export const app = express();
 
@@ -32,6 +34,8 @@ app.use("/api/reportes", reportesRouter);
 app.use("/api/mesas", mesasRouter);
 app.use("/api/cuentas", cuentasRouter);
 app.use("/api/items-consumo", itemsConsumoRouter);
+app.use("/api/gastos", gastosRouter);
+app.use("/api/cierres-caja", cierresCajaRouter);
 
 // Sirve el build de produccion del frontend (frontend/dist) desde este mismo
 // servidor. En desarrollo esa carpeta no existe todavia (se usa el dev
@@ -39,7 +43,7 @@ app.use("/api/items-consumo", itemsConsumoRouter);
 const frontendDist = path.join(__dirname, "../../frontend/dist");
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
-  app.get("*", (req, res, next) => {
+  app.get("/*splat", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path === "/health") {
       return next();
     }

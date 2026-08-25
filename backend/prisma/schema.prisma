@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum RolUsuario {
@@ -52,6 +51,15 @@ enum MetodoPago {
   @@map("metodo_pago")
 }
 
+enum CategoriaGasto {
+  SUELDOS
+  COMIDA_PERSONAL
+  INSUMOS
+  OTRO
+
+  @@map("categoria_gasto")
+}
+
 model Usuario {
   id           Int        @id @default(autoincrement())
   nombre       String
@@ -63,6 +71,8 @@ model Usuario {
 
   movimientosInventario MovimientoInventario[]
   cuentas               Cuenta[]
+  gastos                Gasto[]
+  cierresCaja           CierreDeCaja[]
 
   @@map("usuarios")
 }
@@ -164,6 +174,7 @@ model Cuenta {
   mesa         Mesa          @relation(fields: [mesaId], references: [id])
   usuario      Usuario?      @relation(fields: [usuarioId], references: [id])
   itemsConsumo ItemConsumo[]
+  pagos        Pago[]
 
   @@map("cuentas")
 }
@@ -180,6 +191,70 @@ model ItemConsumo {
 
   cuenta        Cuenta        @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
   productoVenta ProductoVenta @relation(fields: [productoVentaId], references: [id])
+  pagos         Pago[]
 
   @@map("items_consumo")
+}
+
+// Registra cada pago individual (uno por unidad marcada "+1 pagado", o uno
+// por linea del pago mixto al cerrar la cuenta) con su metodo. cuentaId es
+// la fuente de verdad para reportes de caja; itemConsumoId es opcional y se
+// pone en null si el item se elimina, para no perder el registro del dinero.
+model Pago {
+  id              Int        @id @default(autoincrement())
+  cuentaId        Int        @map("cuenta_id")
+  itemConsumoId   Int?       @map("item_consumo_id")
+  monto           Decimal    @db.Decimal(10, 2)
+  metodoPago      MetodoPago @map("metodo_pago")
+  fecha           DateTime   @default(now())
+
+  cuenta      Cuenta       @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
+  itemConsumo ItemConsumo? @relation(fields: [itemConsumoId], references: [id], onDelete: SetNull)
+
+  @@map("pagos")
+}
+
+// Gasto operativo del dia (sueldos, comida del personal, insumos comprados
+// de urgencia, etc.), independiente de las compras de inventario que ya se
+// registran como MovimientoInventario. metodoPago determina si afecta el
+// cuadre de efectivo en CierreDeCaja: solo los gastos en EFECTIVO se
+// descuentan del efectivo que deberia haber en caja.
+model Gasto {
+  id         Int            @id @default(autoincrement())
+  fecha      DateTime       @default(now())
+  concepto   String
+  categoria  CategoriaGasto @default(OTRO)
+  monto      Decimal        @db.Decimal(10, 2)
+  metodoPago MetodoPago     @default(EFECTIVO) @map("metodo_pago")
+  usuarioId  Int?           @map("usuario_id")
+  createdAt  DateTime       @default(now()) @map("created_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@map("gastos")
+}
+
+// Cuadre de caja de una jornada (una fila por dia calendario). montoInicial
+// normalmente es el montoContado del cierre del dia anterior (el sistema lo
+// "recuerda" para arrancar el dia siguiente con ese efectivo), pero se puede
+// pasar manualmente al crear el cierre. montoEsperado = montoInicial +
+// ventasEfectivo - gastosEfectivo; diferencia = montoContado - montoEsperado
+// (positivo = sobra efectivo, negativo = falta).
+model CierreDeCaja {
+  id             Int      @id @default(autoincrement())
+  fecha          DateTime @unique @db.Date
+  montoInicial   Decimal  @db.Decimal(10, 2) @map("monto_inicial")
+  ventasEfectivo Decimal  @db.Decimal(10, 2) @map("ventas_efectivo")
+  gastosEfectivo Decimal  @db.Decimal(10, 2) @map("gastos_efectivo")
+  montoEsperado  Decimal  @db.Decimal(10, 2) @map("monto_esperado")
+  montoContado   Decimal  @db.Decimal(10, 2) @map("monto_contado")
+  diferencia     Decimal  @db.Decimal(10, 2)
+  notas          String?
+  usuarioId      Int?     @map("usuario_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@map("cierres_caja")
 }

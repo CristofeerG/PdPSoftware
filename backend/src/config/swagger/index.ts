@@ -3,6 +3,7 @@ import { authTags, authSchemas, authPaths } from "./auth";
 import { inventarioTags, inventarioSchemas, inventarioPaths } from "./inventario";
 import { reportesTags, reportesSchemas, reportesPaths } from "./reportes";
 import { mesasTags, mesasSchemas, mesasPaths } from "./mesas";
+import { cajaTags, cajaSchemas, cajaPaths } from "./caja";
 
 export const swaggerDocument = {
   openapi: "3.0.0",
@@ -13,7 +14,7 @@ export const swaggerDocument = {
       "API de inventario y gestion de mesas del bar karaoke. Los endpoints se iran agregando modulo por modulo.",
   },
   servers: [{ url: "/api" }],
-  tags: [...authTags, ...inventarioTags, ...mesasTags, ...reportesTags],
+  tags: [...authTags, ...inventarioTags, ...mesasTags, ...reportesTags, ...cajaTags],
   components: {
     securitySchemes: {
       bearerAuth: {
@@ -28,6 +29,7 @@ export const swaggerDocument = {
       ...inventarioSchemas,
       ...mesasSchemas,
       ...reportesSchemas,
+      ...cajaSchemas,
     },
   },
   paths: {
@@ -35,6 +37,7 @@ export const swaggerDocument = {
     ...inventarioPaths,
     ...mesasPaths,
     ...reportesPaths,
+    ...cajaPaths,
   },
 };
 

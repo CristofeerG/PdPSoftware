@@ -4,6 +4,9 @@
   "private": true,
   "description": "Backend del sistema de inventario y mesas para el bar karaoke",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -18,28 +21,31 @@
     "pm2:logs": "pm2 logs posada-del-palomo",
     "backup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/backup-db.ps1"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
-    "@prisma/client": "^5.19.1",
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0",
     "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
+    "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^20.14.15",
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
     "@types/swagger-ui-express": "^4.1.6",
-    "prisma": "^5.19.1",
+    "prisma": "^7.9.1",
     "socket.io-client": "^4.8.3",
     "tsx": "^4.16.5",
-    "typescript": "^5.5.4"
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2"
   }
 }
