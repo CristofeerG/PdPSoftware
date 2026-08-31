@@ -203,8 +203,8 @@ export function UsuariosPage() {
 
       <Modal open={modalNuevoAbierto} title="Nuevo usuario" onClose={() => setModalNuevoAbierto(false)}>
         <div style={{ minWidth: 320, maxWidth: 380, display: "flex", flexDirection: "column", gap: 14 }}>
-          <Input label="Nombre completo" placeholder="Ej. Sofía Ramírez" value={nombre} onChange={(e) => setNombre(e.target.value)} />
-          <Input label="Usuario" placeholder="Ej. sofia" value={nombreUsuario} onChange={(e) => setNombreUsuario(e.target.value)} />
+          <Input label="Nombre completo" placeholder="Ej. Alexis Ramírez" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          <Input label="Usuario" placeholder="Ej. AlexR" value={nombreUsuario} onChange={(e) => setNombreUsuario(e.target.value)} />
           <Input label="Contraseña" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} />
           <Select
             label="Rol"

@@ -4,6 +4,8 @@ import { useApi } from "../../hooks/useApi";
 import { ApiError } from "../../lib/api";
 import { getSocket } from "../../lib/socket";
 import { ds } from "../../lib/designSystem";
+import { useAuth } from "../../context/AuthContext";
+import { useCartStore, type ItemCarrito } from "../../store/useCartStore";
 import type { ProductoVenta } from "../../types/inventario";
 import { ESTADO_MESA_LABEL, METODOS_PAGO, nombreMesa, type ItemConsumo, type Mesa, type MetodoPago } from "../../types/mesas";
 
@@ -20,11 +22,23 @@ const badgeTonePorEstado: Record<Mesa["estado"], "free" | "occupied" | "warning"
   POR_COBRAR: "warning",
 };
 
+// Referencia estable para cuando una mesa no tiene carrito: si el selector de
+// zustand devolviera un array literal ("?? []") se crearía uno nuevo en cada
+// llamada, y useSyncExternalStore entraria en un loop infinito de renders.
+const CARRITO_VACIO: ItemCarrito[] = [];
+
 export function MesaDetallePage() {
   const { id } = useParams();
   const mesaId = Number(id);
   const api = useApi();
+  const { usuario } = useAuth();
   const { Card, Button, Input, Select, Tabs, Modal, MenuItemRow, Badge } = ds();
+
+  const carritoMesa = useCartStore((state) => state.carritos[mesaId] ?? CARRITO_VACIO);
+  const totalCarrito = useCartStore((state) => state.getTotalCarrito(mesaId));
+  const agregarAlCarrito = useCartStore((state) => state.agregarItem);
+  const quitarDelCarrito = useCartStore((state) => state.quitarItem);
+  const cambiarCantidadCarrito = useCartStore((state) => state.cambiarCantidad);
 
   const [mesa, setMesa] = useState<Mesa | null>(null);
   const [otrasMesas, setOtrasMesas] = useState<Mesa[]>([]);
@@ -37,6 +51,9 @@ export function MesaDetallePage() {
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [entregandoId, setEntregandoId] = useState<number | null>(null);
   const [pagandoId, setPagandoId] = useState<number | null>(null);
+  const [enviandoPedido, setEnviandoPedido] = useState(false);
+  const [erroresCarrito, setErroresCarrito] = useState<Record<number, string>>({});
+  const [solicitandoCobro, setSolicitandoCobro] = useState(false);
 
   const [search, setSearch] = useState("");
   const [categoria, setCategoria] = useState("todas");
@@ -110,6 +127,16 @@ export function MesaDetallePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mesaId]);
 
+  // errorAccion es momentaneo: si nadie lo saca antes (cerrarPanel, un nuevo
+  // intento), se borra solo a los 3s para no quedar pegado en pantalla —
+  // sobre todo el de "Stock insuficiente" al agregar producto, que ahora se
+  // ve aunque la cuenta este vacia y sin otra accion que lo tape despues.
+  useEffect(() => {
+    if (!errorAccion) return;
+    const timeout = setTimeout(() => setErrorAccion(null), 3000);
+    return () => clearTimeout(timeout);
+  }, [errorAccion]);
+
   function cerrarPanel() {
     setAccion(null);
     setErrorAccion(null);
@@ -146,7 +173,10 @@ export function MesaDetallePage() {
     }
   }
 
-  async function agregarProducto(producto: ProductoVenta) {
+  // Flujo directo (sin carrito local) para ADMIN: agrega el producto de una
+  // a cuenta.itemsConsumo, igual que hacia agregarProducto antes de que
+  // existiera el carrito. El mesero en cambio usa agregarAlCarrito (abajo).
+  async function agregarProductoDirecto(producto: ProductoVenta) {
     const cuenta = mesa?.cuentaAbierta;
     if (!cuenta) return;
     setErrorAccion(null);
@@ -166,6 +196,50 @@ export function MesaDetallePage() {
       await cargarMesa();
     } catch (err) {
       setErrorAccion(err instanceof ApiError ? err.message : "No se pudo agregar el producto");
+    }
+  }
+
+  async function enviarPedido() {
+    const cuenta = mesa?.cuentaAbierta;
+    if (!cuenta || carritoMesa.length === 0 || enviandoPedido) return;
+    setEnviandoPedido(true);
+    const erroresNuevos: Record<number, string> = {};
+
+    for (const item of carritoMesa) {
+      const existente = cuenta.itemsConsumo.find((ic) => ic.productoVentaId === item.productoVentaId);
+      try {
+        if (existente) {
+          await api(`/cuentas/${cuenta.id}/items/${existente.id}`, {
+            method: "PUT",
+            body: { cantidad: existente.cantidad + item.cantidad },
+          });
+        } else {
+          await api(`/cuentas/${cuenta.id}/items`, {
+            method: "POST",
+            body: { productoVentaId: item.productoVentaId, cantidad: item.cantidad },
+          });
+        }
+        quitarDelCarrito(mesaId, item.productoVentaId);
+      } catch (err) {
+        erroresNuevos[item.productoVentaId] = err instanceof ApiError ? err.message : "No se pudo enviar";
+      }
+    }
+
+    setErroresCarrito(erroresNuevos);
+    setEnviandoPedido(false);
+    await cargarMesa();
+  }
+
+  async function solicitarCobro() {
+    setSolicitandoCobro(true);
+    setErrorAccion(null);
+    try {
+      await api(`/mesas/${mesaId}/solicitar-cobro`, { method: "POST" });
+      await cargarMesa();
+    } catch (err) {
+      setErrorAccion(err instanceof ApiError ? err.message : "No se pudo solicitar el cobro");
+    } finally {
+      setSolicitandoCobro(false);
     }
   }
 
@@ -355,6 +429,40 @@ export function MesaDetallePage() {
     return productos.filter((p) => (p.categoria?.nombre ?? "Otros") === categoria);
   }, [productos, search, categoria]);
 
+  // Valida el stock apenas se arma el pedido (no recien al enviarlo): por
+  // cada item del carrito, resta lo que YA reservan los demas items del
+  // mismo carrito que comparten insumo, y compara lo que queda contra el
+  // stockActual real. Es una foto local (puede quedar desactualizada si otra
+  // mesa consume el mismo insumo mientras tanto) — el chequeo definitivo
+  // sigue siendo el del backend al presionar "Enviar pedido".
+  const erroresStockCarrito = useMemo(() => {
+    const resultado: Record<number, string> = {};
+    for (const item of carritoMesa) {
+      const producto = productos.find((p) => p.id === item.productoVentaId);
+      if (!producto) continue;
+
+      const faltantes: string[] = [];
+      for (const receta of producto.recetaItems) {
+        const requerido = Number(receta.cantidad) * item.cantidad;
+        const reservadoPorOtros = carritoMesa.reduce((acc, otro) => {
+          if (otro.productoVentaId === item.productoVentaId) return acc;
+          const otroProducto = productos.find((p) => p.id === otro.productoVentaId);
+          const recetaCompartida = otroProducto?.recetaItems.find((r) => r.insumoId === receta.insumoId);
+          if (!recetaCompartida) return acc;
+          return acc + Number(recetaCompartida.cantidad) * otro.cantidad;
+        }, 0);
+        const disponible = Number(receta.insumo.stockActual) - reservadoPorOtros;
+        if (disponible < requerido) {
+          faltantes.push(`${receta.insumo.nombre} (disponible ${disponible.toFixed(2)}, se requieren ${requerido.toFixed(2)})`);
+        }
+      }
+      if (faltantes.length > 0) {
+        resultado[item.productoVentaId] = `Stock insuficiente: ${faltantes.join("; ")}`;
+      }
+    }
+    return resultado;
+  }, [carritoMesa, productos]);
+
   if (cargando) return <p style={{ color: "var(--text-secondary)", fontSize: 14 }}>Cargando…</p>;
   if (error || !mesa) return <p style={{ color: "var(--status-danger)", fontSize: 14 }}>{error ?? "Mesa no encontrada"}</p>;
 
@@ -372,6 +480,17 @@ export function MesaDetallePage() {
   const pagosCierreSuma = pagosCierre.reduce((acc, fila) => acc + (Number(fila.monto) || 0), 0);
   const pagosCierreCompletos = !faltaCobrar || pagosCierre.every((fila) => fila.metodoPago !== "" && Number(fila.monto) > 0);
   const pagosCierreSumaCoincide = !faltaCobrar || Math.abs(pagosCierreSuma - montoACobrar) < 0.01;
+  const esMesero = usuario?.rol === "MESERO";
+  const mesaEsperandoCobroParaMesero = mesa.estado === "POR_COBRAR" && esMesero;
+  // El flujo de carrito/"Solicitar Cobro" es exclusivo del mesero: el admin
+  // agrega productos directo a la cuenta y cierra la cuenta el mismo.
+  const puedeSolicitarCobro = esMesero && cuenta !== null && mesa.estado === "OCUPADA" && montoPendiente > 0.01;
+  const mostrarCarritoBorrador = esMesero && carritoMesa.length > 0;
+  // Si la cuenta todavia no tiene nada enviado, esa card no aporta (solo
+  // dice "aun no hay productos"): se oculta para darle todo el espacio al
+  // pedido en borrador. Si ya tiene algo (lo mando este mesero antes, u otro),
+  // se muestra siempre, sin importar si hay o no un borrador nuevo encima.
+  const mostrarCuentaActual = cuenta !== null && cuenta.itemsConsumo.length > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, gap: 16 }}>
@@ -426,72 +545,183 @@ export function MesaDetallePage() {
       ) : (
         <div style={{ display: "flex", gap: 24, height: "100%", minHeight: 0, flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 360px", minWidth: 0, display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-            <div style={{ marginBottom: 14, maxWidth: 360 }}>
-              <Input
-                label="Buscar producto"
-                placeholder="Ej. cerveza, alitas, hora karaoke"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
+            {mesaEsperandoCobroParaMesero ? (
+              <Card>
+                <div style={{ textAlign: "center", padding: "32px 12px", color: "var(--text-secondary)" }}>
+                  Mesa esperando cobro en caja
+                </div>
+              </Card>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14, maxWidth: 360 }}>
+                  <Input
+                    label="Buscar producto"
+                    placeholder="Ej. Agua, mojito, pilsener"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </div>
 
-            {search.trim().length === 0 && (
-              <div style={{ marginBottom: 14, overflowX: "auto" }}>
-                <Tabs
-                  items={categorias.map((c) => ({ value: c, label: c === "todas" ? "Todas" : c }))}
-                  active={categoria}
-                  onChange={setCategoria}
-                />
-              </div>
+                {search.trim().length === 0 && (
+                  <div style={{ marginBottom: 14, overflowX: "auto" }}>
+                    {/* Tabs es "width:auto" (block), asi que sin este wrapper se
+                        angosta al ancho de la columna y sus botones (flex:1,
+                        min-width:auto) se desbordan mas alla de ese ancho sin
+                        llevarse el fondo/sombra del contenedor con ellos — la
+                        ultima categoria queda flotando sin fondo. Con
+                        width:"max-content" el wrapper (y por lo tanto Tabs)
+                        toma el ancho natural de todas las categorias en una
+                        sola linea, y el scroll horizontal del div de afuera
+                        se encarga de mostrarlas. */}
+                    <div style={{ width: "max-content" }}>
+                      <Tabs
+                        items={categorias.map((c) => ({ value: c, label: c === "todas" ? "Todas" : c }))}
+                        active={categoria}
+                        onChange={setCategoria}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ flex: 1, overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
+                    {productosFiltrados.map((producto) => (
+                      <button
+                        key={producto.id}
+                        onClick={() =>
+                          esMesero
+                            ? agregarAlCarrito(mesaId, {
+                                productoVentaId: producto.id,
+                                nombre: producto.nombre,
+                                precioVenta: producto.precioVenta,
+                              })
+                            : agregarProductoDirecto(producto)
+                        }
+                        style={{
+                          textAlign: "left",
+                          padding: "18px 16px",
+                          borderRadius: "var(--radius-m)",
+                          background: "var(--surface-2)",
+                          border: "1px solid var(--border-subtle)",
+                          cursor: "pointer",
+                          fontFamily: "var(--font-body)",
+                          minHeight: 80,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", marginBottom: 8 }}>
+                          {producto.nombre}
+                        </div>
+                        <div style={{ color: "var(--color-gold)", fontWeight: 800, fontSize: 15 }}>
+                          ${Number(producto.precioVenta).toFixed(2)}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
             )}
-
-            <div style={{ flex: 1, overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
-                {productosFiltrados.map((producto) => (
-                  <button
-                    key={producto.id}
-                    onClick={() => agregarProducto(producto)}
-                    style={{
-                      textAlign: "left",
-                      padding: "18px 16px",
-                      borderRadius: "var(--radius-m)",
-                      background: "var(--surface-2)",
-                      border: "1px solid var(--border-subtle)",
-                      cursor: "pointer",
-                      fontFamily: "var(--font-body)",
-                      minHeight: 80,
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", marginBottom: 8 }}>
-                      {producto.nombre}
-                    </div>
-                    <div style={{ color: "var(--color-gold)", fontWeight: 800, fontSize: 15 }}>
-                      ${Number(producto.precioVenta).toFixed(2)}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
-          <div style={{ flex: "0 1 340px", minWidth: 300 }}>
-            <Card style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-              <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)", marginBottom: 4, fontSize: 18 }}>
-                Cuenta actual
-              </div>
-              <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 12 }}>{nombreMesa(mesa)}</div>
+          <div style={{ flex: "0 1 340px", minWidth: 300, display: "flex", flexDirection: "column", gap: 16, height: "100%", minHeight: 0 }}>
+            {/* Antes esto solo se mostraba adentro de la card "Cuenta actual",
+                que se oculta cuando la cuenta todavia no tiene items — o sea
+                que un error de stock al agregar el primer producto (admin,
+                agregarProductoDirecto) quedaba invisible: se podia estar
+                clickeando sin ver por que no pasaba nada. Va acá arriba,
+                siempre visible mientras haya una cuenta abierta y no haya un
+                modal propio mostrando ya su propio error. */}
+            {errorAccion && accion === null && (
+              <p style={{ color: "var(--status-danger)", fontSize: 13, margin: 0 }}>{errorAccion}</p>
+            )}
 
-              {errorAccion && accion === null && (
-                <p style={{ color: "var(--status-danger)", fontSize: 13, marginBottom: 8 }}>{errorAccion}</p>
-              )}
+            {mostrarCarritoBorrador && (
+              <Card
+                style={
+                  mostrarCuentaActual
+                    ? { display: "flex", flexDirection: "column", maxHeight: "45%", minHeight: 0, flexShrink: 0 }
+                    : { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }
+                }
+              >
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)", marginBottom: 4, fontSize: 16 }}>
+                  Pedido nuevo (sin enviar)
+                </div>
+                <div style={{ color: "var(--text-muted)", fontSize: 12, marginBottom: 12 }}>
+                  Se suma a la cuenta recién cuando lo envíes
+                </div>
 
-              <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
-                {cuenta.itemsConsumo.length === 0 ? (
-                  <div style={{ color: "var(--text-muted)", fontSize: 13, padding: "20px 0", textAlign: "center" }}>
-                    Aún no hay productos agregados.
-                  </div>
-                ) : (
-                  cuenta.itemsConsumo.map((item, index) => {
+                <div style={{ flex: 1, overflowY: "auto", minHeight: 0, display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+                  {carritoMesa.map((item) => {
+                    const errorItem = erroresCarrito[item.productoVentaId] ?? erroresStockCarrito[item.productoVentaId];
+                    return (
+                      <div key={item.productoVentaId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <span style={{ fontSize: 14, color: "var(--text-primary)", fontWeight: 600 }}>{item.nombre}</span>
+                          <span style={{ fontSize: 14, color: "var(--color-gold)", fontWeight: 700 }}>
+                            ${(item.cantidad * Number(item.precioVenta)).toFixed(2)}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              onClick={() => cambiarCantidadCarrito(mesaId, item.productoVentaId, item.cantidad - 1)}
+                            >
+                              -
+                            </Button>
+                            <span style={{ fontSize: 13, color: "var(--text-secondary)", minWidth: 18, textAlign: "center" }}>
+                              {item.cantidad}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="s"
+                              onClick={() => cambiarCantidadCarrito(mesaId, item.productoVentaId, item.cantidad + 1)}
+                            >
+                              +
+                            </Button>
+                          </div>
+                          <Button variant="ghost" size="s" onClick={() => quitarDelCarrito(mesaId, item.productoVentaId)}>
+                            Quitar
+                          </Button>
+                        </div>
+                        {errorItem && (
+                          <div style={{ color: "var(--status-danger)", fontSize: 12 }}>⚠ {errorItem}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    fontWeight: 800,
+                    color: "var(--text-primary)",
+                    fontSize: 14,
+                    marginBottom: 12,
+                    borderTop: "1px solid var(--border-subtle)",
+                    paddingTop: 8,
+                  }}
+                >
+                  <span>Subtotal pedido</span>
+                  <span>${totalCarrito.toFixed(2)}</span>
+                </div>
+
+                <Button variant="primary" size="m" disabled={enviandoPedido} onClick={enviarPedido}>
+                  {enviandoPedido ? "Enviando…" : "Enviar pedido"}
+                </Button>
+              </Card>
+            )}
+
+            {mostrarCuentaActual && (
+              <Card style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)", marginBottom: 12, fontSize: 18 }}>
+                  Cuenta actual
+                </div>
+
+                <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+                  {cuenta.itemsConsumo.map((item, index) => {
                     const totalEntregable = item.cantidad * item.productoVenta.unidadesPorEntrega;
                     const completoEntrega = item.cantidadEntregada >= totalEntregable;
                     const completoPago = item.cantidadPagada >= item.cantidad;
@@ -532,21 +762,26 @@ export function MesaDetallePage() {
                             {completoEntrega ? "✓ Entregado" : `${item.cantidadEntregada} de ${totalEntregable} entregadas`}
                           </span>
                           <div style={{ display: "flex", gap: 6 }}>
-                            <Button
-                              variant="ghost"
-                              size="s"
-                              disabled={item.cantidadEntregada <= 0 || entregandoId === item.id}
-                              onClick={() => deshacerEntrega(item)}
-                            >
-                              -1
-                            </Button>
+                            {/* El Button de la DS no acepta style/className, así que el
+                                "-1" (deshacer, uso raro) se atenúa envolviéndolo en un div
+                                con opacity para que no compita visualmente con el "+1". */}
+                            <div style={{ opacity: 0.5 }}>
+                              <Button
+                                variant="ghost"
+                                size="s"
+                                disabled={item.cantidadEntregada <= 0 || entregandoId === item.id}
+                                onClick={() => deshacerEntrega(item)}
+                              >
+                                -1
+                              </Button>
+                            </div>
                             <Button
                               variant="ghost"
                               size="s"
                               disabled={completoEntrega || entregandoId === item.id}
                               onClick={() => marcarEntregado(item)}
                             >
-                              {entregandoId === item.id ? "…" : "+1 entregada"}
+                              {entregandoId === item.id ? "…" : "+1"}
                             </Button>
                           </div>
                         </div>
@@ -569,75 +804,117 @@ export function MesaDetallePage() {
                             {completoPago ? "✓ Pagado" : `${item.cantidadPagada} de ${item.cantidad} ${unidadPago} pagados`}
                           </span>
                           <div style={{ display: "flex", gap: 6 }}>
-                            <Button
-                              variant="ghost"
-                              size="s"
-                              disabled={item.cantidadPagada <= 0 || pagandoId === item.id}
-                              onClick={() => deshacerPago(item)}
-                            >
-                              -1
-                            </Button>
+                            <div style={{ opacity: 0.5 }}>
+                              <Button
+                                variant="ghost"
+                                size="s"
+                                disabled={item.cantidadPagada <= 0 || pagandoId === item.id}
+                                onClick={() => deshacerPago(item)}
+                              >
+                                -1
+                              </Button>
+                            </div>
                             <Button
                               variant="ghost"
                               size="s"
                               disabled={completoPago || pagandoId === item.id}
                               onClick={() => setItemParaPagar(item)}
                             >
-                              {pagandoId === item.id ? "…" : "+1 pagado"}
+                              {pagandoId === item.id ? "…" : "+1"}
                             </Button>
                           </div>
                         </div>
                       </div>
                     );
-                  })
-                )}
-              </div>
-
-              <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 8, paddingTop: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text-muted)" }}>
-                  <span>Total consumido</span>
-                  <span>${totalFixed}</span>
+                  })}
                 </div>
-                {montoPagado > 0 && (
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--status-success)" }}>
-                    <span>Ya pagado</span>
-                    <span>-${montoPagado.toFixed(2)}</span>
+
+                <div style={{ borderTop: "1px solid var(--border-subtle)", marginTop: 8, paddingTop: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--text-muted)" }}>
+                    <span>Total consumido</span>
+                    <span>${totalFixed}</span>
                   </div>
-                )}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "6px 0 0",
-                    fontWeight: 800,
-                    color: "var(--text-primary)",
-                    fontSize: 17,
-                  }}
-                >
-                  <span>{montoPagado > 0 ? "Pendiente por cobrar" : "Total"}</span>
-                  <span>${montoPendienteFixed}</span>
+                  {montoPagado > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--status-success)" }}>
+                      <span>Ya pagado</span>
+                      <span>-${montoPagado.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "6px 0 0",
+                      fontWeight: 800,
+                      color: "var(--text-primary)",
+                      fontSize: 17,
+                    }}
+                  >
+                    <span>{montoPagado > 0 ? "Pendiente por cobrar" : "Total"}</span>
+                    <span>${montoPendienteFixed}</span>
+                  </div>
                 </div>
-              </div>
+              </Card>
+            )}
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <Button variant="ghost" size="l" onClick={() => alternarAccion("dividir")} disabled={cuenta.itemsConsumo.length === 0}>
-                  Dividir cuenta
-                </Button>
-                <Button variant="ghost" size="l" onClick={() => alternarAccion("unir")}>
-                  Unir mesas
-                </Button>
-                <Button
-                  variant="primary"
-                  size="l"
-                  onClick={() => {
-                    setPagosCierre([{ metodoPago: "", monto: montoPendienteFixed }]);
-                    alternarAccion("cerrar");
-                  }}
-                >
-                  Cerrar cuenta
-                </Button>
-              </div>
-            </Card>
+            {/* A diferencia de la card de arriba (lista de items), esta NO se
+                oculta cuando la cuenta esta vacia: si un mesero/admin abre una
+                mesa por error y no llega a pedir nada, necesita poder cerrarla
+                igual — sin esta botonera visible, una cuenta vacia queda sin
+                forma de cerrarse desde aca. */}
+            {cuenta && (
+              <Card style={{ flexShrink: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", flexDirection: "row", gap: 10 }}>
+                    {/* Cada boton va en su propio div flex-column: el Button de la DS
+                        solo estira a 100% cuando es hijo directo de un contenedor
+                        flex-column (align-items:stretch), asi quedan parejos y
+                        angostos uno al lado del otro en vez de ocupar todo el ancho.
+                        El texto va en un span con whiteSpace:nowrap porque el Button
+                        de la DS no acepta className/style: sin esto, "Dividir cuenta"
+                        se parte en dos lineas al angostarse y queda mas alto que
+                        "Unir mesas", perdiendo la alineación pareja entre ambos. */}
+                    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+                      <Button variant="ghost" size="s" onClick={() => alternarAccion("dividir")} disabled={cuenta.itemsConsumo.length === 0}>
+                        <span style={{ whiteSpace: "nowrap" }}>Dividir cuenta</span>
+                      </Button>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+                      <Button variant="ghost" size="s" onClick={() => alternarAccion("unir")}>
+                        <span style={{ whiteSpace: "nowrap" }}>Unir mesas</span>
+                      </Button>
+                    </div>
+                  </div>
+                  {puedeSolicitarCobro && (
+                    <Button
+                      variant="secondary"
+                      size="m"
+                      disabled={carritoMesa.length > 0 || solicitandoCobro}
+                      onClick={solicitarCobro}
+                    >
+                      {solicitandoCobro ? "Solicitando…" : "Solicitar Cobro"}
+                    </Button>
+                  )}
+                  {puedeSolicitarCobro && carritoMesa.length > 0 && (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: -4, textAlign: "center" }}>
+                      Enviá el pedido antes de solicitar el cobro
+                    </div>
+                  )}
+                  {usuario?.rol === "ADMIN" && (
+                    <Button
+                      variant="primary"
+                      size="m"
+                      onClick={() => {
+                        setPagosCierre([{ metodoPago: "", monto: montoPendienteFixed }]);
+                        alternarAccion("cerrar");
+                      }}
+                    >
+                      Cerrar cuenta
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            )}
           </div>
         </div>
       )}

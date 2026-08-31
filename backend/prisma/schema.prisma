@@ -154,6 +154,7 @@ model Mesa {
   numero Int        @unique
   nombre String?
   estado EstadoMesa @default(LIBRE)
+  activo Boolean    @default(true)
 
   cuentas Cuenta[]
 

@@ -129,6 +129,7 @@ export const inventarioSchemas = {
           id: { type: "integer" },
           nombre: { type: "string" },
           unidad: { type: "string", enum: ["ML", "UNIDAD"] },
+          stockActual: { type: "string", example: "750.00" },
         },
       },
     },

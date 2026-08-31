@@ -17,6 +17,7 @@ export interface VentasPorPeriodo {
   periodo: string;
   total: string;
   cantidadCuentas: number;
+  desglosePagos: Record<MetodoPago, string>;
 }
 
 export interface ProductoVendido {

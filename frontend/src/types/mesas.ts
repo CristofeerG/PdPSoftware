@@ -16,6 +16,15 @@ export interface ItemConsumo {
   productoVenta: { id: number; nombre: string; unidadesPorEntrega: number; categoria: { nombre: string } };
 }
 
+export interface Pago {
+  id: number;
+  cuentaId: number;
+  itemConsumoId: number | null;
+  monto: string;
+  metodoPago: MetodoPago;
+  fecha: string;
+}
+
 export interface Cuenta {
   id: number;
   mesaId: number;
@@ -29,6 +38,10 @@ export interface Cuenta {
   itemsConsumo: ItemConsumo[];
   usuario?: UsuarioResumen | null;
   mesa?: { id: number; numero: number; nombre: string | null; estado: EstadoMesa };
+  // Solo viene poblado en los endpoints que traen el detalle completo de la
+  // cuenta (historial, /:id, cerrar, dividir); cuenta.metodoPago no alcanza
+  // para pagos mixtos, ahi queda en null.
+  pagos?: Pago[];
 }
 
 export interface Mesa {
@@ -36,6 +49,7 @@ export interface Mesa {
   numero: number;
   nombre: string | null;
   estado: EstadoMesa;
+  activo: boolean;
   cuentaAbierta: Cuenta | null;
 }
 

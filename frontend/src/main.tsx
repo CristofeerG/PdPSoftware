@@ -1,5 +1,6 @@
 import React, { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { registerSW } from 'virtual:pwa-register'
 import '@fontsource/inter/400.css'
 import '@fontsource/inter/500.css'
@@ -7,6 +8,10 @@ import '@fontsource/inter/600.css'
 import '@fontsource/inter/700.css'
 import './index.css'
 import App from './App.tsx'
+
+// Instancia a nivel de modulo: se crea una sola vez y persiste durante toda
+// la vida de la app (no se recrea en cada render).
+const queryClient = new QueryClient()
 
 // Chequea si hay una version nueva del service worker cada 5 minutos y la
 // aplica sola (registerType: autoUpdate), asi el sistema se actualiza en la
@@ -44,7 +49,9 @@ cargarSistemaDeDiseno()
   .then(() => {
     createRoot(root).render(
       <StrictMode>
-        <App />
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
       </StrictMode>,
     )
   })

@@ -197,6 +197,24 @@ export const mesasPaths = {
       },
     },
   },
+  "/mesas/{id}/solicitar-cobro": {
+    post: {
+      tags: ["Mesas"],
+      summary: "Solicitar el cobro de una mesa",
+      description:
+        "La mesa debe estar OCUPADA con una cuenta ABIERTA. Marca la mesa como POR_COBRAR y notifica por socket ('cobro:solicitado') para que un ADMIN vaya a cerrarla; no cierra la cuenta.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam("ID de la mesa")],
+      responses: {
+        "200": {
+          description: "Mesa actualizada a POR_COBRAR",
+          content: { "application/json": { schema: { $ref: "#/components/schemas/Mesa" } } },
+        },
+        "404": errorResponse("Mesa no encontrada"),
+        "409": errorResponse("La mesa no esta ocupada, o no tiene una cuenta abierta"),
+      },
+    },
+  },
   "/mesas/{id}/unir": {
     post: {
       tags: ["Mesas"],
@@ -327,7 +345,7 @@ export const mesasPaths = {
       tags: ["Cuentas"],
       summary: "Cerrar cuenta (RF14)",
       description:
-        "Fija el total final (restando el descuento, si se envia) y el metodo de pago, y libera la mesa.",
+        "Fija el total final (restando el descuento, si se envia) y el metodo de pago, y libera la mesa. Requiere rol ADMIN.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam("ID de la cuenta")],
       requestBody: {
@@ -340,6 +358,7 @@ export const mesasPaths = {
           content: { "application/json": { schema: { $ref: "#/components/schemas/Cuenta" } } },
         },
         "400": errorResponse("pagos invalido, suma de pagos distinta al monto a cobrar, o descuento invalido/mayor al total"),
+        "403": errorResponse("Requiere rol ADMIN"),
         "404": errorResponse("Cuenta no encontrada"),
         "409": errorResponse("La cuenta ya esta cerrada"),
       },

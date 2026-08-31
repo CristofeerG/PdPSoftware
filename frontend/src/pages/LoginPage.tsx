@@ -130,7 +130,7 @@ export function LoginPage() {
             <input
               value={usuarioInput}
               onChange={(event) => setUsuarioInput(event.target.value)}
-              placeholder="jorge.m"
+              placeholder="cristofeer.g"
               autoComplete="username"
               required
               style={estiloInput}

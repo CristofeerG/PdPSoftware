@@ -14,6 +14,7 @@ export function ProductosVentaPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
+  const [pagina, setPagina] = useState(0);
 
   async function cargar() {
     setLoading(true);
@@ -62,6 +63,17 @@ export function ProductosVentaPage() {
       .sort((a, b) => a.nombreCategoria.localeCompare(b.nombreCategoria));
   }, [productos, busqueda]);
 
+  // Acá la "página" es una categoría entera, no un bloque de N productos: cada
+  // categoría se ve completa (por eso no hay tope por cantidad), y se navega
+  // de una categoría a la siguiente.
+  useEffect(() => {
+    setPagina(0);
+  }, [busqueda]);
+
+  const totalPaginas = grupos.length;
+  const paginaSegura = Math.min(pagina, Math.max(0, totalPaginas - 1));
+  const grupoActual = grupos[paginaSegura] ?? null;
+
   return (
     <Card>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -89,14 +101,14 @@ export function ProductosVentaPage() {
       ) : grupos.length === 0 ? (
         <p className="text-sm text-texto-secundario">No se encontraron productos para "{busqueda}".</p>
       ) : (
-        <div className="flex flex-col gap-6">
-          {grupos.map(({ nombreCategoria, items }) => (
-            <div key={nombreCategoria}>
+        grupoActual && (
+          <div className="flex flex-col gap-4">
+            <div>
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-texto-secundario">
-                {nombreCategoria}
+                {grupoActual.nombreCategoria}
               </h2>
               <ul className="divide-y divide-black/20">
-                {items.map((producto) => (
+                {grupoActual.items.map((producto) => (
                   <li key={producto.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                     <div>
                       <p className="font-medium text-texto">{producto.nombre}</p>
@@ -122,8 +134,34 @@ export function ProductosVentaPage() {
                 ))}
               </ul>
             </div>
-          ))}
-        </div>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  disabled={paginaSegura === 0}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-texto transition-colors hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Categoría anterior"
+                >
+                  ‹
+                </button>
+                <span className="text-xs text-texto-secundario">
+                  Categoría {paginaSegura + 1} de {totalPaginas}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                  disabled={paginaSegura >= totalPaginas - 1}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-texto transition-colors hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Categoría siguiente"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
+        )
       )}
     </Card>
   );

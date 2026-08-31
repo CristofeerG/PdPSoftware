@@ -9,7 +9,10 @@ export const productosVentaRouter = Router();
 
 const recetaInclude = {
   recetaItems: {
-    include: { insumo: { select: { id: true, nombre: true, unidad: true } } },
+    // stockActual se expone aca para que el mesero pueda ver, al armar el
+    // pedido en el carrito local, si alcanza el stock antes de mandarlo
+    // (ver MesaDetallePage.tsx).
+    include: { insumo: { select: { id: true, nombre: true, unidad: true, stockActual: true } } },
   },
   categoria: true,
 } satisfies Prisma.ProductoVentaInclude;
@@ -213,7 +216,7 @@ productosVentaRouter.get(
 
     const receta = await prisma.recetaItem.findMany({
       where: { productoVentaId: id },
-      include: { insumo: { select: { id: true, nombre: true, unidad: true } } },
+      include: { insumo: { select: { id: true, nombre: true, unidad: true, stockActual: true } } },
     });
     res.json(receta);
   }),
@@ -240,7 +243,7 @@ productosVentaRouter.post(
     try {
       const recetaItem = await prisma.recetaItem.create({
         data: { productoVentaId: id, insumoId, cantidad },
-        include: { insumo: { select: { id: true, nombre: true, unidad: true } } },
+        include: { insumo: { select: { id: true, nombre: true, unidad: true, stockActual: true } } },
       });
       res.status(201).json(recetaItem);
     } catch (error) {
@@ -278,7 +281,7 @@ productosVentaRouter.put(
     const recetaItem = await prisma.recetaItem.update({
       where: { id: recetaItemId },
       data: { cantidad },
-      include: { insumo: { select: { id: true, nombre: true, unidad: true } } },
+      include: { insumo: { select: { id: true, nombre: true, unidad: true, stockActual: true } } },
     });
     res.json(recetaItem);
   }),

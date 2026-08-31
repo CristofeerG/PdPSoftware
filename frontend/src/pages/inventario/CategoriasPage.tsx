@@ -8,11 +8,14 @@ import { Field } from "../../components/ui/Field";
 import { Input } from "../../components/ui/Input";
 import { ConfirmButton } from "../../components/ui/ConfirmButton";
 
+const POR_PAGINA = 10;
+
 export function CategoriasPage() {
   const api = useApi();
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pagina, setPagina] = useState(0);
 
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const [nombre, setNombre] = useState("");
@@ -42,6 +45,10 @@ export function CategoriasPage() {
     setNombre(categoria.nombre);
     setFormError(null);
   }
+
+  const totalPaginas = Math.max(1, Math.ceil(categorias.length / POR_PAGINA));
+  const paginaSegura = Math.min(pagina, totalPaginas - 1);
+  const categoriasMostradas = categorias.slice(paginaSegura * POR_PAGINA, paginaSegura * POR_PAGINA + POR_PAGINA);
 
   function cancelar() {
     setEditandoId(null);
@@ -90,19 +97,47 @@ export function CategoriasPage() {
         ) : categorias.length === 0 ? (
           <p className="text-sm text-texto-secundario">Todavía no hay categorías.</p>
         ) : (
-          <ul className="divide-y divide-black/20">
-            {categorias.map((categoria) => (
-              <li key={categoria.id} className="flex items-center justify-between gap-3 py-2">
-                <span className="text-texto">{categoria.nombre}</span>
-                <span className="flex items-center gap-1">
-                  <Button variant="ghost" className="px-2 py-1" onClick={() => iniciarEdicion(categoria)}>
-                    Editar
-                  </Button>
-                  <ConfirmButton onConfirm={() => eliminar(categoria.id)} />
+          <>
+            <ul className="divide-y divide-black/20">
+              {categoriasMostradas.map((categoria) => (
+                <li key={categoria.id} className="flex items-center justify-between gap-3 py-2">
+                  <span className="text-texto">{categoria.nombre}</span>
+                  <span className="flex items-center gap-1">
+                    <Button variant="ghost" className="px-2 py-1" onClick={() => iniciarEdicion(categoria)}>
+                      Editar
+                    </Button>
+                    <ConfirmButton onConfirm={() => eliminar(categoria.id)} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {totalPaginas > 1 && (
+              <div className="flex items-center justify-between gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.max(0, p - 1))}
+                  disabled={paginaSegura === 0}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-texto transition-colors hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Página anterior"
+                >
+                  ‹
+                </button>
+                <span className="text-xs text-texto-secundario">
+                  Página {paginaSegura + 1} de {totalPaginas} · {categorias.length} categorías en total
                 </span>
-              </li>
-            ))}
-          </ul>
+                <button
+                  type="button"
+                  onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+                  disabled={paginaSegura >= totalPaginas - 1}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/20 text-texto transition-colors hover:bg-black/30 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Página siguiente"
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </>
         )}
       </Card>
 

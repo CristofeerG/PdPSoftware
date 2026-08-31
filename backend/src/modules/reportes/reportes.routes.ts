@@ -51,20 +51,42 @@ reportesRouter.get(
     // parametros timestamptz (${desde}/${hasta}), desfasando el filtro y el agrupado
     // por dia/semana/mes segun el offset del servidor (ej. cuentas cerradas recientes
     // quedaban afuera del rango por defecto).
-    const filas = await prisma.$queryRaw<{ periodo: string; total: string; cantidadCuentas: number }[]>`
+    const filas = await prisma.$queryRaw<
+      { periodo: string; total: string; cantidadCuentas: number; efectivo: string; tarjeta: string; transferencia: string }[]
+    >`
+      WITH pagos_por_cuenta AS (
+        SELECT
+          cuenta_id,
+          SUM(CASE WHEN metodo_pago = 'EFECTIVO' THEN monto ELSE 0 END) as efectivo,
+          SUM(CASE WHEN metodo_pago = 'TARJETA' THEN monto ELSE 0 END) as tarjeta,
+          SUM(CASE WHEN metodo_pago = 'TRANSFERENCIA' THEN monto ELSE 0 END) as transferencia
+        FROM pagos
+        GROUP BY cuenta_id
+      )
       SELECT
-        to_char(date_trunc(${UNIDADES_TRUNCADO[agrupacion]}, fecha_cierre AT TIME ZONE 'UTC'), 'YYYY-MM-DD') as periodo,
-        SUM(total)::numeric(12,2)::text as total,
-        COUNT(*)::int as "cantidadCuentas"
-      FROM cuentas
-      WHERE estado = 'CERRADA'
-        AND fecha_cierre AT TIME ZONE 'UTC' >= ${desde}
-        AND fecha_cierre AT TIME ZONE 'UTC' <= ${hasta}
+        to_char(date_trunc(${UNIDADES_TRUNCADO[agrupacion]}, c.fecha_cierre AT TIME ZONE 'UTC'), 'YYYY-MM-DD') as periodo,
+        SUM(c.total)::numeric(12,2)::text as total,
+        COUNT(*)::int as "cantidadCuentas",
+        COALESCE(SUM(pc.efectivo), 0)::numeric(12,2)::text as efectivo,
+        COALESCE(SUM(pc.tarjeta), 0)::numeric(12,2)::text as tarjeta,
+        COALESCE(SUM(pc.transferencia), 0)::numeric(12,2)::text as transferencia
+      FROM cuentas c
+      LEFT JOIN pagos_por_cuenta pc ON pc.cuenta_id = c.id
+      WHERE c.estado = 'CERRADA'
+        AND c.fecha_cierre AT TIME ZONE 'UTC' >= ${desde}
+        AND c.fecha_cierre AT TIME ZONE 'UTC' <= ${hasta}
       GROUP BY periodo
       ORDER BY periodo ASC
     `;
 
-    res.json(filas);
+    res.json(
+      filas.map((fila) => ({
+        periodo: fila.periodo,
+        total: fila.total,
+        cantidadCuentas: fila.cantidadCuentas,
+        desglosePagos: { EFECTIVO: fila.efectivo, TARJETA: fila.tarjeta, TRANSFERENCIA: fila.transferencia },
+      })),
+    );
   }),
 );
 

@@ -191,7 +191,7 @@ export function ProductoVentaFormPage() {
                 id="pv-nombre"
                 value={nombre}
                 onChange={(event) => setNombre(event.target.value)}
-                placeholder="Ej. Tequila — Shot"
+                placeholder="Ej. Michelada de maracuyá"
                 required
               />
             </Field>

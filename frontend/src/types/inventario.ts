@@ -42,7 +42,7 @@ export interface RecetaItem {
   productoVentaId: number;
   insumoId: number;
   cantidad: string;
-  insumo: { id: number; nombre: string; unidad: UnidadMedida };
+  insumo: { id: number; nombre: string; unidad: UnidadMedida; stockActual: string };
 }
 
 export interface ProductoVenta {

@@ -22,6 +22,8 @@ const FORM_VACIO: FormInsumo = { nombre: "", categoriaId: "", unidad: "UNIDAD", 
 
 const MOTIVOS_AJUSTE = ["Conteo físico", "Merma", "Rotura", "Corrección", "Otro"];
 
+const POR_PAGINA = 10;
+
 function estadoInsumo(insumo: Insumo): EstadoInsumo {
   const actual = Number(insumo.stockActual);
   const minimo = Number(insumo.stockMinimo);
@@ -54,6 +56,7 @@ export function InsumosPage() {
   const [search, setSearch] = useState("");
   const [categoriaFiltro, setCategoriaFiltro] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState<FiltroEstado>("todos");
+  const [pagina, setPagina] = useState(0);
 
   const [modalInsumo, setModalInsumo] = useState<ModalInsumo>(null);
   const [editandoId, setEditandoId] = useState<number | null>(null);
@@ -114,6 +117,16 @@ export function InsumosPage() {
       return true;
     });
   }, [insumos, search, categoriaFiltro, estadoFiltro]);
+
+  // Si el filtro cambia (o deja de haber resultados suficientes) volvemos a
+  // la primera página, para no quedar mostrando una página vacía.
+  useEffect(() => {
+    setPagina(0);
+  }, [search, categoriaFiltro, estadoFiltro]);
+
+  const totalPaginas = Math.max(1, Math.ceil(insumosFiltrados.length / POR_PAGINA));
+  const paginaSegura = Math.min(pagina, totalPaginas - 1);
+  const insumosMostrados = insumosFiltrados.slice(paginaSegura * POR_PAGINA, paginaSegura * POR_PAGINA + POR_PAGINA);
 
   function abrirNuevoInsumo() {
     setEditandoId(null);
@@ -364,7 +377,7 @@ export function InsumosPage() {
 
       <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <Input label="Buscar insumo" placeholder="Ej. limón, tequila, hielo" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Input label="Buscar insumo" placeholder="Ej. maracuyá, tequila, mango" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div style={{ width: 220 }}>
           <Select
@@ -412,7 +425,7 @@ export function InsumosPage() {
           {insumosFiltrados.length === 0 ? (
             <div style={{ padding: 20, color: "var(--text-secondary)", fontSize: 14 }}>Ningún insumo coincide con el filtro.</div>
           ) : (
-            insumosFiltrados.map((insumo) => {
+            insumosMostrados.map((insumo) => {
               const estado = estadoInsumo(insumo);
               return (
                 <div
@@ -452,6 +465,33 @@ export function InsumosPage() {
                 </div>
               );
             })
+          )}
+          {totalPaginas > 1 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "12px 20px",
+                borderTop: "1px solid var(--border-subtle)",
+              }}
+            >
+              <Button variant="ghost" size="s" disabled={paginaSegura === 0} onClick={() => setPagina((p) => Math.max(0, p - 1))}>
+                ‹ Anterior
+              </Button>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Página {paginaSegura + 1} de {totalPaginas} · {insumosFiltrados.length} insumos
+              </span>
+              <Button
+                variant="ghost"
+                size="s"
+                disabled={paginaSegura >= totalPaginas - 1}
+                onClick={() => setPagina((p) => Math.min(totalPaginas - 1, p + 1))}
+              >
+                Siguiente ›
+              </Button>
+            </div>
           )}
         </Card>
       </div>

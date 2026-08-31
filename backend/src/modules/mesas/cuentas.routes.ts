@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
-import { authenticate } from "../../middleware/auth";
+import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { isFiniteNumber, isPositiveInteger, isPositiveNumber, parseIntParam } from "../../lib/validation";
 import {
@@ -30,7 +30,7 @@ const itemsInclude = {
   },
 } as const;
 
-function calcularMontoPagado(itemsConsumo: { cantidadPagada: number; precioUnitario: Prisma.Decimal }[]): Prisma.Decimal {
+export function calcularMontoPagado(itemsConsumo: { cantidadPagada: number; precioUnitario: Prisma.Decimal }[]): Prisma.Decimal {
   return itemsConsumo.reduce(
     (acc, item) => acc.plus(new Prisma.Decimal(item.precioUnitario).times(item.cantidadPagada)),
     new Prisma.Decimal(0),
@@ -40,6 +40,9 @@ function calcularMontoPagado(itemsConsumo: { cantidadPagada: number; precioUnita
 const cuentaDetalleInclude = {
   mesa: true,
   usuario: { select: { id: true, nombre: true, usuario: true } },
+  // Se incluyen los pagos para poder mostrar el desglose real de la cuenta
+  // (cuenta.metodoPago queda en null cuando el pago fue mixto, ver /:id/cerrar).
+  pagos: { orderBy: { id: "asc" } },
   ...itemsInclude,
 } as const;
 
@@ -359,6 +362,7 @@ cuentasRouter.delete(
 
 cuentasRouter.post(
   "/:id/cerrar",
+  requireRole("ADMIN"),
   asyncHandler(async (req, res) => {
     const cuentaId = parseIntParam(req.params.id);
     if (cuentaId === null) return res.status(400).json({ error: "id invalido" });

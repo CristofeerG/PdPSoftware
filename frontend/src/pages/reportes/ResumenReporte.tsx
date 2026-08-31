@@ -16,6 +16,38 @@ interface MeseroFila {
   ventas: number;
 }
 
+const ANCHO_GRAFICA = 600;
+const ALTO_GRAFICA = 140;
+const PAD_X_GRAFICA = 8;
+const PAD_Y_GRAFICA = 10;
+const ETIQUETAS_HORAS_GRAFICA = [0, 3, 6, 9, 12, 15, 18, 21];
+
+function formatHora(hora: number): string {
+  const periodo = hora < 12 ? "am" : "pm";
+  const hora12 = hora % 12 === 0 ? 12 : hora % 12;
+  return `${hora12}${periodo}`;
+}
+
+// Curva suave (Catmull-Rom → Bézier) que pasa por todos los puntos, para que
+// la línea de horas pico no se vea quebrada como un gráfico de barras.
+function pathSuave(puntos: { x: number; y: number }[]): string {
+  if (puntos.length === 0) return "";
+  if (puntos.length === 1) return `M ${puntos[0].x} ${puntos[0].y}`;
+  let d = `M ${puntos[0].x} ${puntos[0].y}`;
+  for (let i = 0; i < puntos.length - 1; i++) {
+    const p0 = puntos[i === 0 ? i : i - 1];
+    const p1 = puntos[i];
+    const p2 = puntos[i + 1];
+    const p3 = puntos[i + 2 < puntos.length ? i + 2 : i + 1];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+  }
+  return d;
+}
+
 export function ResumenReporte() {
   const api = useApi();
   const { Card, Tabs } = ds();
@@ -58,8 +90,34 @@ export function ResumenReporte() {
 
   const totalVentas = ventas.reduce((acc, fila) => acc + Number(fila.total), 0);
   const totalCuentas = ventas.reduce((acc, fila) => acc + fila.cantidadCuentas, 0);
-  const maximoBarra = ventas.reduce((max, fila) => Math.max(max, Number(fila.total)), 0);
   const topProducto = productos[0];
+
+  // Ventas agrupadas por hora del día (0-23), sumando todas las cuentas
+  // cerradas del rango seleccionado, para ver en qué horas se vende más.
+  const ventasPorHora = useMemo(() => {
+    const totales = new Array(24).fill(0) as number[];
+    for (const cuenta of cuentas) {
+      const fecha = cuenta.fechaCierre ?? cuenta.fechaApertura;
+      if (!fecha) continue;
+      totales[new Date(fecha).getHours()] += Number(cuenta.total);
+    }
+    return totales.map((total, hora) => ({ hora, total }));
+  }, [cuentas]);
+
+  const maximoHora = ventasPorHora.reduce((max, h) => Math.max(max, h.total), 0);
+  const horaPico = ventasPorHora.reduce((pico, h) => (h.total > pico.total ? h : pico), ventasPorHora[0]);
+
+  const puntosGrafica = ventasPorHora.map((h, i) => ({
+    x: PAD_X_GRAFICA + (i / 23) * (ANCHO_GRAFICA - 2 * PAD_X_GRAFICA),
+    y:
+      PAD_Y_GRAFICA +
+      (maximoHora > 0 ? (1 - h.total / maximoHora) : 1) * (ALTO_GRAFICA - PAD_Y_GRAFICA),
+  }));
+  const lineaGrafica = pathSuave(puntosGrafica);
+  const areaGrafica =
+    puntosGrafica.length > 0
+      ? `${lineaGrafica} L ${puntosGrafica[puntosGrafica.length - 1].x} ${ALTO_GRAFICA} L ${puntosGrafica[0].x} ${ALTO_GRAFICA} Z`
+      : "";
 
   const meseros = useMemo<MeseroFila[]>(() => {
     const porUsuario = new Map<string, { nombre: string; mesas: Set<number>; ventas: number }>();
@@ -132,25 +190,39 @@ export function ResumenReporte() {
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
         <div style={{ flex: "1.4 1 320px" }}>
           <Card>
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)", marginBottom: 16 }}>Ventas</div>
-            {ventas.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "var(--text-primary)" }}>Horas pico de venta</div>
+              {maximoHora > 0 && (
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  Pico: <span style={{ color: "var(--color-gold)", fontWeight: 700 }}>{formatHora(horaPico.hora)}</span> · $
+                  {horaPico.total.toFixed(2)}
+                </div>
+              )}
+            </div>
+            {maximoHora === 0 ? (
               <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>No hay cuentas cerradas en este rango.</p>
             ) : (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 150 }}>
-                {ventas.map((fila) => (
-                  <div key={fila.periodo} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }}>
-                    <div
-                      style={{
-                        width: "100%",
-                        background: "var(--color-gold)",
-                        borderRadius: "6px 6px 0 0",
-                        height: `${maximoBarra > 0 ? Math.max(4, (Number(fila.total) / maximoBarra) * 100) : 0}%`,
-                      }}
-                    />
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>{fila.periodo.slice(5)}</div>
-                  </div>
-                ))}
-              </div>
+              <>
+                <svg
+                  viewBox={`0 0 ${ANCHO_GRAFICA} ${ALTO_GRAFICA}`}
+                  style={{ width: "100%", height: 150, display: "block" }}
+                  preserveAspectRatio="none"
+                >
+                  <defs>
+                    <linearGradient id="gradienteHorasPico" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--color-gold)" stopOpacity="0.35" />
+                      <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d={areaGrafica} fill="url(#gradienteHorasPico)" stroke="none" />
+                  <path d={lineaGrafica} fill="none" stroke="var(--color-gold)" strokeWidth={2.5} strokeLinecap="round" />
+                </svg>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
+                  {ETIQUETAS_HORAS_GRAFICA.map((h) => (
+                    <span key={h}>{formatHora(h)}</span>
+                  ))}
+                </div>
+              </>
             )}
           </Card>
         </div>

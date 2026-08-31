@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
-import { authenticate } from "../../middleware/auth";
+import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { isFiniteNumber, parseIntParam } from "../../lib/validation";
-import { emitCuentaAbierta, emitMesaActualizada } from "../../lib/socketEvents";
+import { isFiniteNumber, isNonEmptyString, parseIntParam } from "../../lib/validation";
+import { emitCobroSolicitado, emitCuentaAbierta, emitMesaActualizada } from "../../lib/socketEvents";
+import { calcularMontoPagado } from "./cuentas.routes";
 
 export const mesasRouter = Router();
 
@@ -23,8 +25,11 @@ const cuentaAbiertaInclude = {
 
 mesasRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const incluirInactivas = req.query.incluirInactivas === "true";
+
     const mesas = await prisma.mesa.findMany({
+      where: incluirInactivas ? {} : { activo: true },
       orderBy: { numero: "asc" },
       include: { cuentas: { where: { estado: "ABIERTA" }, include: cuentaAbiertaInclude } },
     });
@@ -35,6 +40,64 @@ mesasRouter.get(
         cuentaAbierta: cuentas[0] ?? null,
       })),
     );
+  }),
+);
+
+// Identificador puede ser el numero de mesa (texto numerico, ej. "5") o un
+// nombre de texto (ej. "Vip"). Si coincide con una mesa inactiva existente,
+// se reactiva en vez de duplicarla.
+mesasRouter.post(
+  "/",
+  requireRole("ADMIN"),
+  asyncHandler(async (req, res) => {
+    const { identificador } = req.body ?? {};
+    // OJO: no convertir a Number() antes de este chequeo. Number("") da 0,
+    // no NaN, y un identificador vacio se colaria como "mesa numero 0".
+    if (!isNonEmptyString(identificador)) {
+      return res.status(400).json({ error: "identificador es requerido" });
+    }
+    const texto = identificador.trim();
+
+    const numero = Number(texto);
+    const esNumerico = Number.isInteger(numero) && numero > 0;
+
+    const existente = esNumerico
+      ? await prisma.mesa.findFirst({ where: { numero } })
+      : await prisma.mesa.findFirst({ where: { nombre: { equals: texto, mode: "insensitive" } } });
+
+    if (existente) {
+      if (!existente.activo) {
+        const reactivada = await prisma.mesa.update({ where: { id: existente.id }, data: { activo: true } });
+        emitMesaActualizada({ id: reactivada.id, numero: reactivada.numero, estado: reactivada.estado, total: null });
+        return res.json(reactivada);
+      }
+      const descripcion = existente.nombre ?? `numero ${existente.numero}`;
+      return res.status(400).json({
+        error: `Ya existe una mesa activa con ese nombre/numero (mesa "${descripcion}")`,
+      });
+    }
+
+    try {
+      const mesa = await prisma.$transaction(async (tx) => {
+        if (esNumerico) {
+          return tx.mesa.create({ data: { numero, nombre: null } });
+        }
+        // El siguiente numero se calcula sobre TODA la tabla, incluyendo
+        // mesas inactivas: si solo se mirara entre las activas se podria
+        // repetir el numero de una inactiva y violar el unique constraint.
+        const maximo = await tx.mesa.aggregate({ _max: { numero: true } });
+        const siguienteNumero = (maximo._max.numero ?? 0) + 1;
+        return tx.mesa.create({ data: { numero: siguienteNumero, nombre: texto } });
+      });
+
+      emitMesaActualizada({ id: mesa.id, numero: mesa.numero, estado: mesa.estado, total: null });
+      res.status(201).json(mesa);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        return res.status(409).json({ error: "Ya existe una mesa con ese numero" });
+      }
+      throw error;
+    }
   }),
 );
 
@@ -98,6 +161,52 @@ mesasRouter.post(
     emitCuentaAbierta(id, cuenta);
 
     res.status(201).json(cuenta);
+  }),
+);
+
+mesasRouter.post(
+  "/:id/solicitar-cobro",
+  asyncHandler(async (req, res) => {
+    const id = parseIntParam(req.params.id);
+    if (id === null) return res.status(400).json({ error: "id invalido" });
+
+    const mesa = await prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) return res.status(404).json({ error: "Mesa no encontrada" });
+    if (mesa.estado !== "OCUPADA") {
+      return res.status(409).json({ error: "La mesa no esta ocupada" });
+    }
+
+    const cuenta = await prisma.cuenta.findFirst({
+      where: { mesaId: id, estado: "ABIERTA" },
+      include: { itemsConsumo: { select: { cantidadPagada: true, precioUnitario: true } } },
+    });
+    if (!cuenta) {
+      return res.status(409).json({ error: "La mesa no tiene una cuenta abierta" });
+    }
+
+    // El total de la cuenta es el consumo bruto; si ya se marcaron items como
+    // pagados (flujo "+1 pagado" en la mesa), lo que realmente falta cobrar
+    // es el total menos eso. El aviso a caja tiene que llevar ese pendiente,
+    // no el total bruto, o el admin termina cobrando de mas.
+    const montoPendiente = new Prisma.Decimal(cuenta.total).minus(calcularMontoPagado(cuenta.itemsConsumo));
+
+    const mesaActualizada = await prisma.mesa.update({ where: { id }, data: { estado: "POR_COBRAR" } });
+
+    emitMesaActualizada({
+      id: mesaActualizada.id,
+      numero: mesaActualizada.numero,
+      estado: "POR_COBRAR",
+      total: cuenta.total.toString(),
+    });
+    emitCobroSolicitado({
+      mesaId: mesaActualizada.id,
+      cuentaId: cuenta.id,
+      nombreMesa: mesaActualizada.nombre,
+      numero: mesaActualizada.numero,
+      total: montoPendiente.toString(),
+    });
+
+    res.json(mesaActualizada);
   }),
 );
 
@@ -173,5 +282,60 @@ mesasRouter.post(
     });
 
     res.json(cuentaFinal);
+  }),
+);
+
+mesasRouter.post(
+  "/:id/activar",
+  requireRole("ADMIN"),
+  asyncHandler(async (req, res) => {
+    const id = parseIntParam(req.params.id);
+    if (id === null) return res.status(400).json({ error: "id invalido" });
+
+    const mesa = await prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) return res.status(404).json({ error: "Mesa no encontrada" });
+
+    // Idempotente: si ya esta activa, no hace falta tocar nada.
+    const mesaActualizada = mesa.activo ? mesa : await prisma.mesa.update({ where: { id }, data: { activo: true } });
+
+    emitMesaActualizada({
+      id: mesaActualizada.id,
+      numero: mesaActualizada.numero,
+      estado: mesaActualizada.estado,
+      total: null,
+    });
+
+    res.json(mesaActualizada);
+  }),
+);
+
+mesasRouter.post(
+  "/:id/desactivar",
+  requireRole("ADMIN"),
+  asyncHandler(async (req, res) => {
+    const id = parseIntParam(req.params.id);
+    if (id === null) return res.status(400).json({ error: "id invalido" });
+
+    const mesa = await prisma.mesa.findUnique({ where: { id } });
+    if (!mesa) return res.status(404).json({ error: "Mesa no encontrada" });
+
+    // Idempotente: si ya esta inactiva, no hace falta tocar nada (ni
+    // validar el estado, que a esta altura ya no es relevante).
+    let mesaActualizada = mesa;
+    if (mesa.activo) {
+      if (mesa.estado !== "LIBRE") {
+        return res.status(400).json({ error: "La mesa no esta libre" });
+      }
+      mesaActualizada = await prisma.mesa.update({ where: { id }, data: { activo: false } });
+    }
+
+    emitMesaActualizada({
+      id: mesaActualizada.id,
+      numero: mesaActualizada.numero,
+      estado: mesaActualizada.estado,
+      total: null,
+    });
+
+    res.json(mesaActualizada);
   }),
 );

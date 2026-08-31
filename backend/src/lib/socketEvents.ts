@@ -12,6 +12,19 @@ export function emitMesaActualizada(mesa: MesaResumen): void {
   getIo().to(ROOMS.mesasOverview).emit("mesa:actualizada", mesa);
 }
 
+export interface CobroSolicitadoPayload {
+  mesaId: number;
+  cuentaId: number;
+  nombreMesa: string | null;
+  numero: number;
+  /** Monto pendiente de cobro (total de la cuenta menos lo ya marcado "pagado"), no el total bruto de la cuenta. */
+  total: string;
+}
+
+export function emitCobroSolicitado(payload: CobroSolicitadoPayload): void {
+  getIo().to(ROOMS.mesasOverview).emit("cobro:solicitado", payload);
+}
+
 export function emitCuentaAbierta(mesaId: number, cuenta: unknown): void {
   getIo().to(ROOMS.mesa(mesaId)).emit("cuenta:abierta", cuenta);
 }
