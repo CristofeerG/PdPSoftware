@@ -4,20 +4,16 @@ import { prisma } from "../../lib/prisma";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { isFiniteNumber } from "../../lib/validation";
+import { finDelDia, hoyLocalISO, inicioDeHoy, parseFechaDia } from "../../lib/fechasNegocio";
 
 export const cierresCajaRouter = Router();
 
 cierresCajaRouter.use(authenticate, requireRole("ADMIN"));
 
-function parseFechaDia(valor: unknown): Date | null {
-  if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return null;
-  const fecha = new Date(`${valor}T00:00:00.000Z`);
-  return Number.isNaN(fecha.getTime()) ? null : fecha;
-}
-
-function finDelDia(inicio: Date): Date {
-  return new Date(inicio.getTime() + 24 * 60 * 60 * 1000 - 1);
-}
+// La ventana de dia calendario local se calcula con parseFechaDia/finDelDia
+// (ver lib/fechasNegocio.ts). No afecta los cierres ya guardados:
+// CierreDeCaja.fecha es @db.Date (solo fecha, sin hora), y T00:00-05:00 cae
+// en el mismo dia UTC que T00:00Z, asi que la clave unica no cambia.
 
 /** Efectivo vendido y gastado ese dia calendario (para el cuadre de caja). */
 async function calcularMovimientoEfectivo(inicio: Date, fin: Date) {
@@ -50,9 +46,12 @@ async function sugerirMontoInicial(fecha: Date) {
 cierresCajaRouter.get(
   "/preview",
   asyncHandler(async (req, res) => {
-    const fechaParam = req.query.fecha !== undefined ? String(req.query.fecha) : new Date().toISOString().slice(0, 10);
+    const fechaParam = req.query.fecha !== undefined ? String(req.query.fecha) : hoyLocalISO();
     const inicio = parseFechaDia(fechaParam);
     if (!inicio) return res.status(400).json({ error: "fecha debe tener formato YYYY-MM-DD" });
+    if (inicio.getTime() > inicioDeHoy().getTime()) {
+      return res.status(400).json({ error: "fecha todavia no ocurre" });
+    }
     const fin = finDelDia(inicio);
 
     // montoInicial/ventas/gastos/esperado se recalculan siempre en vivo, incluso si
@@ -72,6 +71,18 @@ cierresCajaRouter.get(
     ]);
     const montoEsperado = montoInicial.plus(movimiento.ventasEfectivo).minus(movimiento.gastosEfectivo);
 
+    // El registro guardado queda "congelado" con lo que se conocia al momento
+    // del cierre. Si despues aparece o se corrige una venta/gasto de ese
+    // mismo dia (o, como paso una vez, se guardo el cierre antes de que el
+    // dia terminara), lo guardado deja de coincidir con lo que se recalcula
+    // en vivo arriba. Antes esto era invisible: la pantalla mostraba el
+    // numero en vivo (correcto) sin avisar que el registro persistido ya no
+    // coincidia con el, y ese desfase se arrastraba en silencio al
+    // montoInicial sugerido del dia siguiente via sugerirMontoInicial.
+    const desactualizado =
+      existente !== null &&
+      (!existente.ventasEfectivo.equals(movimiento.ventasEfectivo) || !existente.gastosEfectivo.equals(movimiento.gastosEfectivo));
+
     res.json({
       fecha: fechaParam,
       cerrado: existente !== null,
@@ -83,6 +94,7 @@ cierresCajaRouter.get(
       diferencia: existente ? existente.montoContado.minus(montoEsperado).toFixed(2) : null,
       notas: existente?.notas ?? null,
       usuario: existente?.usuario ?? null,
+      desactualizado,
     });
   }),
 );
@@ -122,6 +134,14 @@ cierresCajaRouter.post(
 
     const inicio = parseFechaDia(fecha);
     if (!inicio) return res.status(400).json({ error: "fecha debe tener formato YYYY-MM-DD" });
+    // Un cierre se guardo una vez para un dia que, en la zona horaria del
+    // negocio, todavia no habia empezado (quedo con ventas/gastos en $0
+    // porque literalmente no habia pasado nada ese dia todavia), y ese
+    // registro incompleto se arrastro al dia siguiente via
+    // sugerirMontoInicial. No se puede cerrar un dia que todavia no ocurre.
+    if (inicio.getTime() > inicioDeHoy().getTime()) {
+      return res.status(400).json({ error: "No se puede cerrar un dia que todavia no ocurre" });
+    }
     if (!isFiniteNumber(montoContado) || montoContado < 0) {
       return res.status(400).json({ error: "montoContado debe ser un numero mayor o igual a 0" });
     }

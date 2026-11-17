@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma";
 import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { parseIntParam } from "../../lib/validation";
+import { OFFSET_CORTE_JORNADA, hoyLocalISO, parseFechaDia, parseFechaQuery } from "../../lib/fechasNegocio";
 
 export const reportesRouter = Router();
 
@@ -13,12 +14,6 @@ const METODOS_PAGO = ["EFECTIVO", "TARJETA", "TRANSFERENCIA"] as const;
 
 const UNIDADES_TRUNCADO = { dia: "day", semana: "week", mes: "month" } as const;
 type Agrupacion = keyof typeof UNIDADES_TRUNCADO;
-
-function parseFechaQuery(valor: unknown): Date | null | undefined {
-  if (valor === undefined) return undefined;
-  const fecha = new Date(String(valor));
-  return Number.isNaN(fecha.getTime()) ? null : fecha;
-}
 
 reportesRouter.get(
   "/ventas",
@@ -31,7 +26,7 @@ reportesRouter.get(
     const agrupacion = agrupacionParam as Agrupacion;
 
     let desde: Date;
-    const desdeParseada = parseFechaQuery(req.query.desde);
+    const desdeParseada = parseFechaQuery(req.query.desde, "inicio");
     if (desdeParseada === null) return res.status(400).json({ error: "desde invalida" });
     if (desdeParseada === undefined) {
       desde = new Date();
@@ -41,16 +36,17 @@ reportesRouter.get(
     }
 
     let hasta: Date;
-    const hastaParseada = parseFechaQuery(req.query.hasta);
+    const hastaParseada = parseFechaQuery(req.query.hasta, "fin");
     if (hastaParseada === null) return res.status(400).json({ error: "hasta invalida" });
     hasta = hastaParseada ?? new Date();
 
-    // fecha_cierre se guarda como "timestamp" (sin zona horaria) con el valor UTC tal
-    // cual lo maneja Prisma. Sin "AT TIME ZONE 'UTC'", Postgres reinterpreta ese valor
-    // naive usando la zona horaria de la sesion del servidor al compararlo con los
-    // parametros timestamptz (${desde}/${hasta}), desfasando el filtro y el agrupado
-    // por dia/semana/mes segun el offset del servidor (ej. cuentas cerradas recientes
-    // quedaban afuera del rango por defecto).
+    // fecha_cierre es "timestamptz" (instante real, con zona horaria): la
+    // comparacion contra desde/hasta es directa, sin ambiguedad. La sesion de
+    // Postgres se conecta forzada a UTC (ver lib/prisma.ts), asi que para
+    // agrupar "por dia/semana/mes" segun el dia de negocio (corte a las 6am,
+    // ver lib/fechasNegocio.ts) hay que convertir explicitamente antes del
+    // date_trunc (si no, "por dia" agruparia por dia calendario UTC desde
+    // medianoche, partiendo una misma noche de trabajo en dos).
     const filas = await prisma.$queryRaw<
       { periodo: string; total: string; cantidadCuentas: number; efectivo: string; tarjeta: string; transferencia: string }[]
     >`
@@ -64,7 +60,7 @@ reportesRouter.get(
         GROUP BY cuenta_id
       )
       SELECT
-        to_char(date_trunc(${UNIDADES_TRUNCADO[agrupacion]}, c.fecha_cierre AT TIME ZONE 'UTC'), 'YYYY-MM-DD') as periodo,
+        to_char(date_trunc(${UNIDADES_TRUNCADO[agrupacion]}, c.fecha_cierre AT TIME ZONE ${OFFSET_CORTE_JORNADA}), 'YYYY-MM-DD') as periodo,
         SUM(c.total)::numeric(12,2)::text as total,
         COUNT(*)::int as "cantidadCuentas",
         COALESCE(SUM(pc.efectivo), 0)::numeric(12,2)::text as efectivo,
@@ -73,8 +69,8 @@ reportesRouter.get(
       FROM cuentas c
       LEFT JOIN pagos_por_cuenta pc ON pc.cuenta_id = c.id
       WHERE c.estado = 'CERRADA'
-        AND c.fecha_cierre AT TIME ZONE 'UTC' >= ${desde}
-        AND c.fecha_cierre AT TIME ZONE 'UTC' <= ${hasta}
+        AND c.fecha_cierre >= ${desde}
+        AND c.fecha_cierre <= ${hasta}
       GROUP BY periodo
       ORDER BY periodo ASC
     `;
@@ -101,9 +97,9 @@ reportesRouter.get(
       return res.status(400).json({ error: "limit debe ser un entero mayor a 0" });
     }
 
-    const desde = parseFechaQuery(req.query.desde);
+    const desde = parseFechaQuery(req.query.desde, "inicio");
     if (desde === null) return res.status(400).json({ error: "desde invalida" });
-    const hasta = parseFechaQuery(req.query.hasta);
+    const hasta = parseFechaQuery(req.query.hasta, "fin");
     if (hasta === null) return res.status(400).json({ error: "hasta invalida" });
 
     const fechaCierreFiltro: Prisma.DateTimeFilter = {};
@@ -145,14 +141,14 @@ reportesRouter.get(
   "/cierre-caja",
   requireRole("ADMIN"),
   asyncHandler(async (req, res) => {
-    const fecha = req.query.fecha !== undefined ? String(req.query.fecha) : new Date().toISOString().slice(0, 10);
+    const fecha = req.query.fecha !== undefined ? String(req.query.fecha) : hoyLocalISO();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
       return res.status(400).json({ error: "fecha debe tener formato YYYY-MM-DD" });
     }
 
-    const inicio = new Date(`${fecha}T00:00:00.000Z`);
-    const fin = new Date(`${fecha}T23:59:59.999Z`);
-    if (Number.isNaN(inicio.getTime())) return res.status(400).json({ error: "fecha invalida" });
+    const inicio = parseFechaDia(fecha);
+    if (!inicio) return res.status(400).json({ error: "fecha invalida" });
+    const fin = parseFechaQuery(fecha, "fin") as Date;
 
     const cuentas = await prisma.cuenta.findMany({
       where: { estado: "CERRADA", fechaCierre: { gte: inicio, lte: fin } },
@@ -163,9 +159,21 @@ reportesRouter.get(
 
     // El desglose por metodo sale de los pagos individuales (no de
     // cuenta.metodoPago, que solo cubre el caso de un metodo unico) para que
-    // cuadre con pagos mixtos y con "+1 pagado" cobrado antes del cierre.
+    // cuadre con pagos mixtos y con "+1 pagado" cobrado antes del cierre. Se
+    // filtra por la cuenta a la que pertenece el pago (misma cuenta que
+    // totalVendido/cantidadCuentas arriba), no por la fecha propia del pago:
+    // asi los tres numeros de esta respuesta siempre suman consistente y
+    // coincide con el desglose de /reportes/ventas para el mismo rango. Un
+    // pago hecho un dia antes de que se cierre la cuenta (ej. "+1 pagado"
+    // cobrado la noche anterior) se cuenta en el dia en que la cuenta cerro,
+    // igual que ya se hace con su monto en totalVendido.
+    //
+    // Esto es distinto (a proposito) del cuadre de caja fisico en
+    // cierres.routes.ts, que si necesita el efectivo por la fecha real en que
+    // entro/salio de la caja (calcularMovimientoEfectivo), sin importar
+    // cuando se cerro la cuenta.
     const pagosDelDia = await prisma.pago.findMany({
-      where: { fecha: { gte: inicio, lte: fin } },
+      where: { cuenta: { estado: "CERRADA", fechaCierre: { gte: inicio, lte: fin } } },
       select: { monto: true, metodoPago: true },
     });
 

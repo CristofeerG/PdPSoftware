@@ -5,6 +5,7 @@ import { authenticate, requireRole } from "../../middleware/auth";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { isNonEmptyString, isPositiveNumber, parseIntParam } from "../../lib/validation";
 import { METODOS_PAGO_VALIDOS } from "../mesas/cuentas.routes";
+import { hoyLocalISO, parseFechaDia } from "../../lib/fechasNegocio";
 
 export const gastosRouter = Router();
 
@@ -12,16 +13,10 @@ gastosRouter.use(authenticate, requireRole("ADMIN"));
 
 const CATEGORIAS_GASTO_VALIDAS = Object.values(CategoriaGasto);
 
-function parseFechaDia(valor: unknown): Date | null {
-  if (typeof valor !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return null;
-  const fecha = new Date(`${valor}T00:00:00.000Z`);
-  return Number.isNaN(fecha.getTime()) ? null : fecha;
-}
-
 gastosRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    const fechaParam = req.query.fecha !== undefined ? String(req.query.fecha) : new Date().toISOString().slice(0, 10);
+    const fechaParam = req.query.fecha !== undefined ? String(req.query.fecha) : hoyLocalISO();
     const inicio = parseFechaDia(fechaParam);
     if (!inicio) return res.status(400).json({ error: "fecha debe tener formato YYYY-MM-DD" });
     const fin = new Date(inicio.getTime() + 24 * 60 * 60 * 1000 - 1);

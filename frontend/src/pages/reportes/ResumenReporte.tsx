@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { format, subDays } from "date-fns";
 import { useApi } from "../../hooks/useApi";
 import { ApiError } from "../../lib/api";
+import { ahoraNegocio } from "../../lib/fechasNegocio";
 import { ds } from "../../lib/designSystem";
 import type { ProductoVendido, VentasPorPeriodo } from "../../types/reportes";
 import type { Cuenta } from "../../types/mesas";
@@ -64,9 +66,19 @@ export function ResumenReporte() {
     setCargando(true);
     setError(null);
 
-    const desde = new Date();
-    desde.setDate(desde.getDate() - DIAS_POR_RANGO[rango]);
-    const params = new URLSearchParams({ desde: desde.toISOString() });
+    // "desde"/"hasta" se mandan como "YYYY-MM-DD" (no un timestamp exacto):
+    // asi el backend los ancla al inicio/fin del dia de negocio (corte a las
+    // 6am, no medianoche, ver lib/fechasNegocio.ts), igual que en Ventas y
+    // Cierre de Caja. Antes se mandaba un timestamp ISO relativo a "ahora"
+    // (una ventana movil de N dias desde el instante en que se abria la
+    // pantalla), que no representaba "hoy" ni ningun otro dia calendario, y
+    // por eso esta pantalla mostraba cuentas y totales distintos a los del
+    // resto de la app. Se usa `ahoraNegocio()` (no `new Date()`) para que
+    // entre medianoche y las 6am "hoy" siga siendo la noche que sigue abierta.
+    const hoy = ahoraNegocio();
+    const desdeStr = format(subDays(hoy, DIAS_POR_RANGO[rango] - 1), "yyyy-MM-dd");
+    const hastaStr = format(hoy, "yyyy-MM-dd");
+    const params = new URLSearchParams({ desde: desdeStr, hasta: hastaStr });
 
     Promise.all([
       api<VentasPorPeriodo[]>(`/reportes/ventas?agrupacion=${AGRUPACION_POR_RANGO[rango]}&${params.toString()}`),

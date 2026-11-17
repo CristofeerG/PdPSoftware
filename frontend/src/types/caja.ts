@@ -37,4 +37,6 @@ export interface CierreDeCaja {
   diferencia: string | null;
   notas: string | null;
   usuario: { id: number; nombre: string } | null;
+  /** true si lo guardado (ventasEfectivo/gastosEfectivo) ya no coincide con lo que hay registrado hoy para ese dia. */
+  desactualizado: boolean;
 }

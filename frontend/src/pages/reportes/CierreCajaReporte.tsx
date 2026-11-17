@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useApi } from "../../hooks/useApi";
 import { ApiError } from "../../lib/api";
+import { hoyNegocioISO as hoyISO } from "../../lib/fechasNegocio";
 import { METODO_PAGO_LABEL, type CierreCaja } from "../../types/reportes";
 import { METODOS_PAGO, type MetodoPago } from "../../types/mesas";
 import { CATEGORIAS_GASTO, CATEGORIA_GASTO_LABEL, type CategoriaGasto, type Gasto, type CierreDeCaja } from "../../types/caja";
@@ -9,10 +10,6 @@ import { Input, Select } from "../../components/ui/Input";
 import { Field } from "../../components/ui/Field";
 import { Button } from "../../components/ui/Button";
 import { ConfirmButton } from "../../components/ui/ConfirmButton";
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export function CierreCajaReporte() {
   const api = useApi();
@@ -288,6 +285,14 @@ export function CierreCajaReporte() {
         <h2 className="text-lg font-semibold text-texto">Cuadre de caja</h2>
 
         {errorCierre && <p className="text-sm text-rojo">{errorCierre}</p>}
+
+        {!cargandoCierre && cierre?.cerrado && cierre.desactualizado && (
+          <p className="rounded-md bg-dorado/15 p-3 text-sm text-dorado">
+            Este cierre ya no coincide con lo registrado para este día (hubo ventas o gastos después de guardarlo, o
+            se guardó antes de que el día terminara). Las ventas/gastos en efectivo de arriba ya muestran el valor
+            real actualizado — para que quede guardado así, usa &quot;Corregir cierre&quot;.
+          </p>
+        )}
 
         {cargandoCierre ? (
           <p className="text-sm text-texto-secundario">Cargando…</p>

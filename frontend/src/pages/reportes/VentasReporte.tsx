@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from "date-fns";
 import { useApi } from "../../hooks/useApi";
 import { ApiError } from "../../lib/api";
+import { ahoraNegocio, hoyNegocioISO } from "../../lib/fechasNegocio";
 import { METODO_PAGO_LABEL, type VentasPorPeriodo } from "../../types/reportes";
 import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
@@ -14,8 +15,8 @@ export function VentasReporte() {
   const api = useApi();
   const [agrupacion, setAgrupacion] = useState<Agrupacion>("dia");
   const [filtroActivo, setFiltroActivo] = useState<FiltroActivo>("hoy");
-  const [desde, setDesde] = useState(() => format(new Date(), "yyyy-MM-dd"));
-  const [hasta, setHasta] = useState(() => format(new Date(), "yyyy-MM-dd"));
+  const [desde, setDesde] = useState(() => hoyNegocioISO());
+  const [hasta, setHasta] = useState(() => hoyNegocioISO());
   const [datos, setDatos] = useState<VentasPorPeriodo[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +54,7 @@ export function VentasReporte() {
     ]);
     const csv = [encabezado, ...filas].map((fila) => fila.join(",")).join("\r\n");
 
-    const nombreArchivo = desde && hasta ? `reporte_ventas_${desde}_a_${hasta}.csv` : `reporte_ventas_${new Date().toISOString().slice(0, 10)}.csv`;
+    const nombreArchivo = desde && hasta ? `reporte_ventas_${desde}_a_${hasta}.csv` : `reporte_ventas_${hoyNegocioISO()}.csv`;
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -78,8 +79,8 @@ export function VentasReporte() {
             className="px-3 py-1"
             onClick={() => {
               setFiltroActivo("hoy");
-              setDesde(format(new Date(), "yyyy-MM-dd"));
-              setHasta(format(new Date(), "yyyy-MM-dd"));
+              setDesde(hoyNegocioISO());
+              setHasta(hoyNegocioISO());
             }}
           >
             Hoy
@@ -90,8 +91,8 @@ export function VentasReporte() {
             className="px-3 py-1"
             onClick={() => {
               setFiltroActivo("semana");
-              setDesde(format(startOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"));
-              setHasta(format(endOfWeek(new Date(), { weekStartsOn: 1 }), "yyyy-MM-dd"));
+              setDesde(format(startOfWeek(ahoraNegocio(), { weekStartsOn: 1 }), "yyyy-MM-dd"));
+              setHasta(format(endOfWeek(ahoraNegocio(), { weekStartsOn: 1 }), "yyyy-MM-dd"));
             }}
           >
             Esta Semana
@@ -102,8 +103,8 @@ export function VentasReporte() {
             className="px-3 py-1"
             onClick={() => {
               setFiltroActivo("mes");
-              setDesde(format(startOfMonth(new Date()), "yyyy-MM-dd"));
-              setHasta(format(endOfMonth(new Date()), "yyyy-MM-dd"));
+              setDesde(format(startOfMonth(ahoraNegocio()), "yyyy-MM-dd"));
+              setHasta(format(endOfMonth(ahoraNegocio()), "yyyy-MM-dd"));
             }}
           >
             Este Mes

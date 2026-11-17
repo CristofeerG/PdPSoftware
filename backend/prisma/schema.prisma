@@ -165,8 +165,8 @@ model Cuenta {
   id            Int          @id @default(autoincrement())
   mesaId        Int          @map("mesa_id")
   usuarioId     Int?         @map("usuario_id")
-  fechaApertura DateTime     @default(now()) @map("fecha_apertura")
-  fechaCierre   DateTime?    @map("fecha_cierre")
+  fechaApertura DateTime     @default(now()) @db.Timestamptz(3) @map("fecha_apertura")
+  fechaCierre   DateTime?    @db.Timestamptz(3) @map("fecha_cierre")
   estado        EstadoCuenta @default(ABIERTA)
   total         Decimal      @default(0) @db.Decimal(10, 2)
   descuento     Decimal      @default(0) @db.Decimal(10, 2)
@@ -207,7 +207,7 @@ model Pago {
   itemConsumoId   Int?       @map("item_consumo_id")
   monto           Decimal    @db.Decimal(10, 2)
   metodoPago      MetodoPago @map("metodo_pago")
-  fecha           DateTime   @default(now())
+  fecha           DateTime   @default(now()) @db.Timestamptz(3)
 
   cuenta      Cuenta       @relation(fields: [cuentaId], references: [id], onDelete: Cascade)
   itemConsumo ItemConsumo? @relation(fields: [itemConsumoId], references: [id], onDelete: SetNull)
@@ -222,7 +222,7 @@ model Pago {
 // descuentan del efectivo que deberia haber en caja.
 model Gasto {
   id         Int            @id @default(autoincrement())
-  fecha      DateTime       @default(now())
+  fecha      DateTime       @default(now()) @db.Timestamptz(3)
   concepto   String
   categoria  CategoriaGasto @default(OTRO)
   monto      Decimal        @db.Decimal(10, 2)

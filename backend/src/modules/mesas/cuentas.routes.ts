@@ -12,6 +12,7 @@ import {
   emitMesaActualizada,
   notificarSiStockBajo,
 } from "../../lib/socketEvents";
+import { parseFechaQuery } from "../../lib/fechasNegocio";
 
 export const cuentasRouter = Router();
 
@@ -89,13 +90,16 @@ cuentasRouter.get(
     if (desde !== undefined || hasta !== undefined) {
       const rango: Prisma.DateTimeFilter = {};
       if (desde !== undefined) {
-        const fechaDesde = new Date(String(desde));
-        if (Number.isNaN(fechaDesde.getTime())) return res.status(400).json({ error: "desde invalida" });
+        // "YYYY-MM-DD" se ancla al inicio del dia en la zona horaria del
+        // negocio (ver lib/fechasNegocio.ts); un timestamp ISO completo se
+        // usa tal cual.
+        const fechaDesde = parseFechaQuery(desde, "inicio");
+        if (!fechaDesde) return res.status(400).json({ error: "desde invalida" });
         rango.gte = fechaDesde;
       }
       if (hasta !== undefined) {
-        const fechaHasta = new Date(String(hasta));
-        if (Number.isNaN(fechaHasta.getTime())) return res.status(400).json({ error: "hasta invalida" });
+        const fechaHasta = parseFechaQuery(hasta, "fin");
+        if (!fechaHasta) return res.status(400).json({ error: "hasta invalida" });
         rango.lte = fechaHasta;
       }
       if (filtrarPorCierre) {
